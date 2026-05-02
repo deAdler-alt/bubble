@@ -1,13 +1,19 @@
+/**
+ * START — jedna kolumna na gridzie: tytuł / scena (Bąbel) / płyta. Bez bocznych ramek.
+ */
+
 import {
   useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type RefObject,
 } from "react";
-import { motion } from "framer-motion";
+import { motion, useAnimationFrame, useMotionValue } from "framer-motion";
 import { VinylButton } from "../components/VinylButton";
+import { screenStartRoot } from "./screenLayout";
 
 const DIALOGUE_LINES = [
   "Cześć! Jestem Bąbel!",
@@ -15,16 +21,34 @@ const DIALOGUE_LINES = [
   "Naciśnij wielką płytę!",
 ] as const;
 
-/** Bufor (px): losowanie pozycji, żeby maskotka nie wychodziła poza viewport. */
-const MASCOT_BOUNDS_W = 260;
-const MASCOT_BOUNDS_H = 340;
+const LINES_ROTATE_MS = 10_000;
+
+const MASCOT_BOUNDS_W = 268;
+const MASCOT_BOUNDS_H = 352;
+
+const DRIFT_AX = 0.42;
+const DRIFT_AY = 0.36;
+const DRIFT_SECONDARY = 0.18;
+const JITTER_AX = 6.5;
+
+const mainGridStyle: CSSProperties = {
+  display: "grid",
+  width: "100%",
+  height: "100%",
+  minHeight: 0,
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gridTemplateRows: "auto minmax(0, 1fr) auto",
+  rowGap: 0,
+};
 
 function useResponsiveVinylSize() {
-  const [size, setSize] = useState(280);
+  const [size, setSize] = useState(260);
   useLayoutEffect(() => {
     const clamp = () => {
-      const m = Math.min(window.innerWidth, window.innerHeight);
-      setSize(Math.min(Math.round(m * 0.5), 440));
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const next = Math.round(Math.min(vw * 0.42, vh * 0.3));
+      setSize(Math.min(420, Math.max(200, next)));
     };
     clamp();
     window.addEventListener("resize", clamp);
@@ -37,8 +61,39 @@ type StartScreenProps = {
   onPlay: () => void;
 };
 
-const speakerShellClass =
-  "z-[2] max-h-[min(72dvh,560px)] w-[min(33vw,max(9rem,20rem))] min-w-[7rem] -translate-y-1/2";
+function DjMenuMegaTitle() {
+  const font =
+    "'Bungee',Impact,Haettenschweiler,ui-sans-serif,system-ui,sans-serif";
+  const unified = {
+    fontFamily: font,
+    fontSize: "clamp(2rem, min(11vw, 10dvh), 6.25rem)",
+    letterSpacing: "0.14em",
+    lineHeight: 1.02,
+    textTransform: "uppercase" as const,
+    backgroundImage:
+      "linear-gradient(175deg,#fff8c9 0%,#fde68a 18%,#d8b4fe 52%,#6b21a8 92%)",
+    WebkitBackgroundClip: "text" as const,
+    backgroundClip: "text" as const,
+    color: "transparent",
+    textShadow:
+      "0 12px 0 #0b0118,0 22px 0 rgba(0,0,0,0.55),0 0 38px rgba(168,85,247,0.85),0 0 80px rgba(250,204,21,0.35)",
+    paddingBottom: "0.08em",
+  };
+
+  return (
+    <div className="flex w-full items-center justify-center px-2 pt-[max(env(safe-area-inset-top),12px)] pb-2 [-webkit-font-smoothing:antialiased]">
+      <motion.h1
+        className="text-center font-black"
+        style={unified}
+        initial={{ scale: 0.88, y: -10, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        transition={{ type: "spring", stiffness: 220, damping: 18 }}
+      >
+        DJ&nbsp;BAIBEL
+      </motion.h1>
+    </div>
+  );
+}
 
 export function StartScreen({ onPlay }: StartScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -47,55 +102,39 @@ export function StartScreen({ onPlay }: StartScreenProps) {
   return (
     <motion.div
       key="start"
-      initial={{ opacity: 0, scale: 0.96 }}
+      initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 1.03 }}
-      className="relative h-[100dvh] w-full overflow-hidden bg-transparent"
-      ref={containerRef}
+      exit={{ opacity: 0, scale: 1.02 }}
+      className={screenStartRoot}
     >
-      <div className="relative h-full w-full">
-        <div
-          className={`absolute left-[max(env(safe-area-inset-left),12px)] top-1/2 ${speakerShellClass}`}
-        >
-          <GiantSpeakerArt />
-        </div>
-        <div
-          className={`absolute right-[max(env(safe-area-inset-right),12px)] top-1/2 ${speakerShellClass}`}
-        >
-          <div className="h-full scale-x-[-1]">
-            <GiantSpeakerArt />
-          </div>
+      <div className="h-full min-h-0 w-full" style={mainGridStyle}>
+        <div style={{ gridRow: 1, gridColumn: 1 }}>
+          <DjMenuMegaTitle />
         </div>
 
-        <div className="pointer-events-none absolute inset-0 z-[15] flex items-center justify-center">
-          <div className="pointer-events-auto">
-            <VinylButton
-              size={vinylSize}
-              spinOnHover
-              spinning={false}
-              onClick={onPlay}
-              ariaLabel="Start — naciśnij wielką płytę"
-              label="▶"
-            />
-          </div>
+        <div
+          ref={containerRef}
+          className="relative z-10 min-h-0 overflow-hidden"
+          style={{ gridRow: 2, gridColumn: 1 }}
+        >
+          <StartFloatingBabel containerRef={containerRef} />
         </div>
 
-        <StartFloatingBabel containerRef={containerRef} />
+        <div
+          className="flex min-h-0 items-end justify-center px-2 pb-[max(env(safe-area-inset-bottom),22px)] pt-4"
+          style={{ gridRow: 3, gridColumn: 1 }}
+        >
+          <VinylButton
+            size={vinylSize}
+            spinOnHover
+            spinning={false}
+            onClick={onPlay}
+            ariaLabel="Start — naciśnij wielką płytę"
+            label="▶"
+          />
+        </div>
       </div>
     </motion.div>
-  );
-}
-
-function GiantSpeakerArt() {
-  return (
-    <div className="flex h-full w-full flex-col" aria-hidden>
-      <div className="relative mx-auto aspect-[7/11] max-h-full w-full rounded-[2rem] border-[clamp(6px,1.2vmin,14px)] border-black bg-linear-to-b from-fuchsia-500 via-violet-600 to-cyan-400 shadow-[0_clamp(10px,2vmin,22px)_0_0_rgba(0,0,0,0.8)]">
-        <div className="absolute inset-[10%] rounded-2xl bg-black/58" />
-        <div className="absolute left-1/2 top-[42%] w-[62%] -translate-x-1/2 -translate-y-1/2 rounded-full border-[clamp(5px,0.9vmin,10px)] border-yellow-300 bg-zinc-900 pb-[62%] shadow-inner ring-4 ring-yellow-400/55" />
-        <div className="absolute bottom-[7%] left-1/2 h-[clamp(12px,2.2vmin,20px)] w-[72%] -translate-x-1/2 rounded-full bg-yellow-300/82" />
-      </div>
-      <div className="mx-auto mt-[clamp(8px,1.8vmin,16px)] h-[clamp(12px,2vmin,22px)] w-[78%] rounded-full border-[clamp(5px,0.8vmin,10px)] border-black bg-zinc-800 shadow-[inset_0_4px_0_rgba(255,255,255,0.08)]" />
-    </div>
   );
 }
 
@@ -104,66 +143,96 @@ type StartFloatingBabelProps = {
 };
 
 function StartFloatingBabel({ containerRef }: StartFloatingBabelProps) {
-  const [coords, setCoords] = useState({ x: 16, y: 16 });
+  const x = useMotionValue(12);
+  const y = useMotionValue(12);
+  const layout = useRef({ pad: 10, cw: 400, ch: 800 });
+
   const [dialogueIndex, setDialogueIndex] = useState(0);
 
-  const pickRandomPosition = useCallback(() => {
+  useLayoutEffect(() => {
     const root = containerRef.current;
     if (!root) return;
-    const { width: cw, height: ch } = root.getBoundingClientRect();
-    const pad = 12;
-    const w = Math.min(MASCOT_BOUNDS_W, cw - pad * 2);
-    const h = Math.min(MASCOT_BOUNDS_H, ch - pad * 2);
-    const maxLeft = Math.max(pad, cw - w - pad);
-    const maxTop = Math.max(pad, ch - h - pad);
-    if (maxLeft < pad || maxTop < pad) return;
-    setCoords({
-      x: pad + Math.random() * (maxLeft - pad),
-      y: pad + Math.random() * (maxTop - pad),
-    });
+    const update = () => {
+      const r = root.getBoundingClientRect();
+      layout.current.cw = r.width;
+      layout.current.ch = r.height;
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(root);
+    return () => ro.disconnect();
   }, [containerRef]);
 
-  useLayoutEffect(() => {
-    pickRandomPosition();
-  }, [pickRandomPosition]);
+  useAnimationFrame((time) => {
+    const { pad, cw, ch } = layout.current;
+    const w = Math.min(MASCOT_BOUNDS_W, cw - pad * 2);
+    const h = Math.min(MASCOT_BOUNDS_H, ch - pad * 2);
+    const maxX = Math.max(pad, cw - w - pad);
+    const maxY = Math.max(pad, ch - h - pad);
+    if (maxX <= pad || maxY <= pad) return;
 
-  useEffect(() => {
-    const intervalId = window.setInterval(pickRandomPosition, 8000);
-    return () => window.clearInterval(intervalId);
-  }, [pickRandomPosition]);
+    const u = time * 0.001;
 
-  useEffect(() => {
-    const lineId = window.setInterval(() => {
-      setDialogueIndex((i) => (i + 1) % DIALOGUE_LINES.length);
-    }, 10000);
-    return () => window.clearInterval(lineId);
+    const normX =
+      0.5 +
+      0.48 * Math.sin(u * DRIFT_AX) * Math.cos(u * (DRIFT_AX * 0.28)) +
+      0.08 * Math.sin(u * DRIFT_SECONDARY);
+    const normY =
+      0.5 +
+      0.48 * Math.cos(u * DRIFT_AY + 1.15) * Math.sin(u * (DRIFT_AY * 0.22)) +
+      0.08 * Math.sin(u * (DRIFT_SECONDARY * 1.2) + 0.5);
+
+    const nx = pad + (maxX - pad) * normX + JITTER_AX * Math.sin(u * 3.05);
+    const ny = pad + (maxY - pad) * normY + JITTER_AX * Math.sin(u * 3.55 + 0.9);
+
+    x.set(Math.min(maxX, Math.max(pad, nx)));
+    y.set(Math.min(maxY, Math.max(pad, ny)));
+  });
+
+  const bumpLine = useCallback(() => {
+    setDialogueIndex((i) => (i + 1) % DIALOGUE_LINES.length);
   }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(bumpLine, LINES_ROTATE_MS);
+    return () => window.clearInterval(id);
+  }, [bumpLine]);
 
   return (
     <motion.div
-      className="pointer-events-none absolute left-0 top-0 z-50 flex w-[min(85vw,17rem)] max-w-[17rem] flex-col items-center sm:max-w-[18rem]"
-      initial={false}
-      animate={{ x: coords.x, y: coords.y }}
-      transition={{
-        x: { duration: 6.75, ease: [0.22, 1, 0.36, 1] },
-        y: { duration: 6.75, ease: [0.22, 1, 0.36, 1] },
-      }}
+      className="pointer-events-none absolute left-0 top-0 z-50 flex w-[min(88vw,18rem)] max-w-[18rem] flex-col items-center sm:max-w-[19rem]"
+      style={{ x, y }}
     >
-      <div className="relative z-[2] mb-[-4px] w-full rounded-[2rem] border-[6px] border-black bg-linear-to-br from-yellow-300 via-orange-300 to-pink-400 px-5 py-3 text-center shadow-[0_14px_0_0_black] ring-4 ring-yellow-400/95">
-        <p className="text-[clamp(0.98rem,3.8vmin,1.35rem)] font-bold leading-snug tracking-wide text-black">
-          {DIALOGUE_LINES[dialogueIndex]}
-        </p>
-        <span
-          className="absolute -bottom-3 left-[18%] size-8 rotate-45 bg-orange-300 ring-4 ring-black"
-          aria-hidden
-        />
-      </div>
+      <ThoughtCloud key={dialogueIndex} line={DIALOGUE_LINES[dialogueIndex]} />
       <img
         src="/babel-mascot.png"
         alt="Bąbel"
         draggable={false}
-        className="relative z-[1] w-[min(38vmin,14rem)] max-w-[88%] select-none drop-shadow-[0_18px_0_rgba(0,0,0,0.55)] sm:w-[min(34vmin,16rem)]"
+        className="relative z-[1] mt-[6px] w-[min(38vmin,15rem)] max-w-[90%] select-none drop-shadow-[0_18px_0_rgba(0,0,0,0.55)] sm:w-[min(36vmin,17rem)]"
       />
+    </motion.div>
+  );
+}
+
+function ThoughtCloud({ line }: { line: string }) {
+  return (
+    <motion.div
+      className="relative z-[2] w-full"
+      layout
+      initial={{ scale: 0.62, opacity: 0, y: 26 }}
+      animate={{ scale: 1, opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 420, damping: 26, mass: 0.55 }}
+    >
+      <div className="relative rounded-[2.25rem] border-[6px] border-black bg-linear-to-br from-sky-100 via-white to-amber-100 px-5 py-4 text-center shadow-[0_14px_0_0_black] ring-4 ring-cyan-400/80">
+        <motion.p
+          className="min-h-[2.5rem] text-balance font-sans text-[clamp(1.02rem,3.9vmin,1.48rem)] font-extrabold leading-snug tracking-wide text-zinc-900"
+          initial={{ opacity: 0, y: 10, filter: "blur(6px)" }}
+          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          transition={{ type: "spring", stiffness: 380, damping: 22, delay: 0.05 }}
+        >
+          {line}
+        </motion.p>
+      </div>
     </motion.div>
   );
 }

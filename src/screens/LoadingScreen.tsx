@@ -3,6 +3,7 @@ import { animate, motion, useMotionValue, useTransform } from "framer-motion";
 import { Cog, Music, Sparkles } from "lucide-react";
 import { generateSong } from "../api/djApi";
 import type { GeneratedSong, SongStyle } from "../api/djApi";
+import { screenFlowRoot } from "./screenLayout";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -43,32 +44,37 @@ export function LoadingScreen({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="relative flex min-h-[100dvh] flex-col items-center justify-center overflow-hidden px-4 pb-44 pt-[8vh]"
+      className={`${screenFlowRoot} grid grid-rows-[minmax(0,1fr)_auto_minmax(0,1fr)]`}
     >
+      <div className="min-h-0" />
+
+      <div className="relative z-[2] mx-auto flex w-full max-w-2xl min-h-0 flex-col items-center justify-center gap-10 px-4">
+        <div className="flex flex-wrap items-center justify-center gap-8">
+          {[0, 1, 2].map((i) => (
+            <MiniVinyl key={i} delay={i * 0.3} />
+          ))}
+        </div>
+
+        <div className="flex gap-12 sm:gap-14">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 2.8, repeat: Infinity, ease: "linear" }}
+          >
+            <Cog className="size-[min(22vw,5.5rem)] text-yellow-300 sm:size-24" strokeWidth={2.8} />
+          </motion.div>
+          <motion.div
+            animate={{ rotate: -360 }}
+            transition={{ duration: 3.2, repeat: Infinity, ease: "linear" }}
+          >
+            <Cog className="size-[min(26vw,6.5rem)] text-pink-400 sm:size-28" strokeWidth={2.8} />
+          </motion.div>
+        </div>
+      </div>
+
       <ChaosBg />
-
-      <div className="relative z-[1] flex flex-wrap items-center justify-center gap-8">
-        {[0, 1, 2].map((i) => (
-          <MiniVinyl key={i} delay={i * 0.3} />
-        ))}
-      </div>
-
-      <div className="relative z-[1] mt-14 flex gap-14">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 2.8, repeat: Infinity, ease: "linear" }}
-        >
-          <Cog className="size-20 text-yellow-300 sm:size-24" strokeWidth={2.8} />
-        </motion.div>
-        <motion.div
-          animate={{ rotate: -360 }}
-          transition={{ duration: 3.2, repeat: Infinity, ease: "linear" }}
-        >
-          <Cog className="size-24 text-pink-400 sm:size-28" strokeWidth={2.8} />
-        </motion.div>
-      </div>
-
       <FlyingGlyphs />
+
+      <div className="min-h-0" />
     </motion.div>
   );
 }
@@ -76,7 +82,7 @@ export function LoadingScreen({
 function MiniVinyl({ delay: d }: { delay: number }) {
   return (
     <motion.div
-      className="relative size-24 rounded-full border-[5px] border-black bg-linear-to-br from-fuchsia-500 via-violet-600 to-sky-400 shadow-[0_10px_0_0_black] ring-4 ring-yellow-400/70 sm:size-28"
+      className="relative aspect-square w-[min(28vw,6.75rem)] max-w-[8rem] rounded-full border-[5px] border-black bg-linear-to-br from-fuchsia-500 via-violet-600 to-sky-400 shadow-[0_10px_0_0_black] ring-4 ring-yellow-400/70 sm:w-28"
       style={{ rotate: d * 40 }}
       animate={{ rotate: 360 }}
       transition={{ duration: 1.6, repeat: Infinity, ease: "linear", delay: d }}
@@ -89,19 +95,19 @@ function MiniVinyl({ delay: d }: { delay: number }) {
 
 function ChaosBg() {
   return (
-    <>
-      {[...Array(18)].map((_, i) => (
+    <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+      {[...Array(14)].map((_, i) => (
         <motion.span
           key={i}
-          className="pointer-events-none absolute size-6 rounded-full border-4 border-yellow-400/55 bg-orange-400/35"
+          className="absolute size-[min(4vw,1.75rem)] rounded-full border-[3px] border-yellow-400/55 bg-orange-400/35"
           style={{
-            left: `${5 + ((i * 17) % 90)}%`,
-            top: `${8 + ((i * 23) % 70)}%`,
+            left: `${5 + ((i * 23) % 88)}%`,
+            top: `${6 + ((i * 31) % 72)}%`,
           }}
           animate={{
-            y: [0, -26, 0],
+            y: [0, -22, 0],
             rotate: [0, 360],
-            opacity: [0.25, 0.95, 0.25],
+            opacity: [0.2, 0.92, 0.25],
           }}
           transition={{
             duration: 2 + (i % 5) * 0.35,
@@ -111,13 +117,13 @@ function ChaosBg() {
           }}
         />
       ))}
-    </>
+    </div>
   );
 }
 
 function FlyingGlyphs() {
   const x = useMotionValue(0);
-  const driftX = useTransform(x, (v) => Math.sin(v / 50) * 40);
+  const driftX = useTransform(x, (v) => Math.sin(v / 50) * 36);
 
   useEffect(() => {
     const controls = animate(x, 1000, {
@@ -129,27 +135,34 @@ function FlyingGlyphs() {
   }, [x]);
 
   const items = [
-    { Icon: Music, top: "12%", left: "8%" },
-    { Icon: Sparkles, top: "18%", right: "10%" },
-    { Icon: Music, top: "48%", left: "4%" },
-    { Icon: Sparkles, top: "58%", right: "6%" },
-    { Icon: Music, bottom: "14%", left: "18%" },
-    { Icon: Sparkles, bottom: "20%", right: "14%" },
+    { Icon: Music, top: "12%", left: "6%" },
+    { Icon: Sparkles, top: "16%", right: "8%" },
+    { Icon: Music, top: "42%", left: "4%" },
+    { Icon: Sparkles, top: "52%", right: "5%" },
+    { Icon: Music, bottom: "24%", left: "14%" },
+    { Icon: Sparkles, bottom: "28%", right: "12%" },
   ] as const;
 
   return (
-    <>
+    <div className="pointer-events-none absolute inset-0 z-[1] overflow-hidden">
       {items.map(({ Icon, ...pos }, i) => (
         <motion.div
           key={i}
-          className="pointer-events-none absolute text-cyan-200"
+          className="absolute text-cyan-200"
           style={{ ...pos, x: driftX }}
-          animate={{ y: [0, -30, 0], rotate: [-12, 12, -12], scale: [0.85, 1.2, 0.85] }}
+          animate={{
+            y: [0, -26, 0],
+            rotate: [-12, 12, -12],
+            scale: [0.85, 1.15, 0.85],
+          }}
           transition={{ duration: 2.4 + i * 0.12, repeat: Infinity, ease: "easeInOut" }}
         >
-          <Icon className="size-14 drop-shadow-[0_4px_0_black] sm:size-16" strokeWidth={2.6} />
+          <Icon
+            className="size-[min(11vw,3.75rem)] drop-shadow-[0_4px_0_black] sm:size-16"
+            strokeWidth={2.6}
+          />
         </motion.div>
       ))}
-    </>
+    </div>
   );
 }

@@ -52,10 +52,10 @@ export default function App() {
 
   return (
     <LayoutGroup id="dj-layout">
-      <div className="relative min-h-[100dvh] font-display text-black">
+      <div className="relative min-h-[100dvh] font-sans text-black">
         <DJBoothBackdrop />
 
-        <div className="relative z-[2] mx-auto flex min-h-[100dvh] max-w-6xl flex-col">
+        <div className="relative z-[2] flex min-h-[100dvh] w-full min-w-0 flex-col">
           <AnimatePresence mode="wait">
             {screen === "START" ? (
               <StartScreen key="ev-start" onPlay={() => setScreen("NAGRYWANIE")} />
