@@ -1,9 +1,21 @@
 /**
- * START — jedna kolumna na gridzie: tytuł / scena (Bąbel) / płyta. Bez bocznych ramek.
+ * START — desktop hero, all-in-one (no scroll).
+ * Skład ekranu (od góry do dołu):
+ *   ┌─────────── [1] BLOK TYTUŁU ───────────┐
+ *   │  „DJ BAIBEL" + podtytuł                │
+ *   ├─────────── [2] STAGE (środek) ─────────┤
+ *   │  WIELKI WINYL = przycisk Start         │
+ *   │  Bąbel z dymkiem POWOLI LATA           │
+ *   │  pod spodem CHIP „Naciśnij Płytę"      │
+ *   ├─────────── [3] PASEK PULSACJI ─────────┤
+ *   │  EQ bars u dołu ekranu                 │
+ *   └────────────────────────────────────────┘
+ *
+ * Najczęstsze pokrętła do regulacji są w bloku TUNABLES poniżej —
+ * ZMIEŃ JE TUTAJ żeby przesunąć/przeskalować elementy.
  */
 
 import {
-  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -11,228 +23,441 @@ import {
   type CSSProperties,
   type RefObject,
 } from "react";
-import { motion, useAnimationFrame, useMotionValue } from "framer-motion";
+import { AnimatePresence, motion, useAnimationFrame, useMotionValue } from "framer-motion";
 import { VinylButton } from "../components/VinylButton";
 import { screenStartRoot } from "./screenLayout";
 
-const DIALOGUE_LINES = [
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  TUNABLES — najczęściej zmieniane wartości ekranu         ║
+   ║  (styl CSS w stringach: clamp(min, preferred, max))       ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
+/** Odstęp całego BLOKU TYTUŁU od górnej krawędzi ekranu.
+ *  Zwiększ żeby OBNIŻYĆ „DJ BAIBEL" + podtytuł. */
+const TITLE_TOP_OFFSET = "clamp(3rem, 12dvh, 9rem)";
+
+/** Wysokość pasującego do dołu ekranu PASKA PULSACJI (EQ bars).
+ *  Zwiększ żeby pulsacje były WIĘKSZE / sięgały wyżej. */
+const EQ_BARS_HEIGHT = "clamp(7rem, 22dvh, 14rem)";
+
+/** Liczba słupków EQ na dole ekranu — mniej = grubsze, więcej = drobniejsze. */
+const EQ_BARS_COUNT = 28;
+
+/** Maksymalny rozmiar wielkiego winylu (CTA). */
+const VINYL_MAX_PX = 560;
+
+/** Maksymalny rozmiar maskotki (Bąbel). */
+const MASCOT_MAX_PX = 360;
+
+/** Czas zmiany tekstu w dymku (ms). */
+const LINE_ROTATE_MS = 3400;
+
+/** Teksty w dymku — Bąbel ich rotuje. */
+const LINES = [
   "Cześć! Jestem Bąbel!",
   "Zróbmy razem super piosenkę!",
   "Naciśnij wielką płytę!",
 ] as const;
 
-const LINES_ROTATE_MS = 10_000;
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  KOMPONENT GŁÓWNY                                         ║
+   ╚════════════════════════════════════════════════════════════╝ */
 
-const MASCOT_BOUNDS_W = 268;
-const MASCOT_BOUNDS_H = 352;
-
-const DRIFT_AX = 0.42;
-const DRIFT_AY = 0.36;
-const DRIFT_SECONDARY = 0.18;
-const JITTER_AX = 6.5;
-
-const mainGridStyle: CSSProperties = {
-  display: "grid",
-  width: "100%",
-  height: "100%",
-  minHeight: 0,
-  gridTemplateColumns: "minmax(0, 1fr)",
-  gridTemplateRows: "auto minmax(0, 1fr) auto",
-  rowGap: 0,
-};
-
-function useResponsiveVinylSize() {
-  const [size, setSize] = useState(260);
-  useLayoutEffect(() => {
-    const clamp = () => {
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const next = Math.round(Math.min(vw * 0.42, vh * 0.3));
-      setSize(Math.min(420, Math.max(200, next)));
-    };
-    clamp();
-    window.addEventListener("resize", clamp);
-    return () => window.removeEventListener("resize", clamp);
-  }, []);
-  return size;
-}
-
-type StartScreenProps = {
-  onPlay: () => void;
-};
-
-function DjMenuMegaTitle() {
-  const font =
-    "'Bungee',Impact,Haettenschweiler,ui-sans-serif,system-ui,sans-serif";
-  const unified = {
-    fontFamily: font,
-    fontSize: "clamp(2rem, min(11vw, 10dvh), 6.25rem)",
-    letterSpacing: "0.14em",
-    lineHeight: 1.02,
-    textTransform: "uppercase" as const,
-    backgroundImage:
-      "linear-gradient(175deg,#fff8c9 0%,#fde68a 18%,#d8b4fe 52%,#6b21a8 92%)",
-    WebkitBackgroundClip: "text" as const,
-    backgroundClip: "text" as const,
-    color: "transparent",
-    textShadow:
-      "0 12px 0 #0b0118,0 22px 0 rgba(0,0,0,0.55),0 0 38px rgba(168,85,247,0.85),0 0 80px rgba(250,204,21,0.35)",
-    paddingBottom: "0.08em",
-  };
-
-  return (
-    <div className="flex w-full items-center justify-center px-2 pt-[max(env(safe-area-inset-top),12px)] pb-2 [-webkit-font-smoothing:antialiased]">
-      <motion.h1
-        className="text-center font-black"
-        style={unified}
-        initial={{ scale: 0.88, y: -10, opacity: 0 }}
-        animate={{ scale: 1, y: 0, opacity: 1 }}
-        transition={{ type: "spring", stiffness: 220, damping: 18 }}
-      >
-        DJ&nbsp;BAIBEL
-      </motion.h1>
-    </div>
-  );
-}
+type StartScreenProps = { onPlay: () => void };
 
 export function StartScreen({ onPlay }: StartScreenProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const vinylSize = useResponsiveVinylSize();
+  const stageRef = useRef<HTMLDivElement>(null);
+  const vinylSize = useStageSize({ vw: 0.32, vh: 0.46, min: 320, max: VINYL_MAX_PX });
+  const mascotSize = useStageSize({ vw: 0.18, vh: 0.28, min: 220, max: MASCOT_MAX_PX });
 
   return (
     <motion.div
       key="start"
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 1.02 }}
-      className={screenStartRoot}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, scale: 1.04 }}
+      transition={{ duration: 0.45 }}
+      className={`${screenStartRoot} flex flex-col`}
     >
-      <div className="h-full min-h-0 w-full" style={mainGridStyle}>
-        <div style={{ gridRow: 1, gridColumn: 1 }}>
-          <DjMenuMegaTitle />
-        </div>
+      {/* === DEKORACJE TŁA: latające nutki + EQ bars u dołu === */}
+      <FloatingNotes />
+      <EqBars />
 
-        <div
-          ref={containerRef}
-          className="relative z-10 min-h-0 overflow-hidden"
-          style={{ gridRow: 2, gridColumn: 1 }}
+      <div className="relative z-10 mx-auto flex h-full w-full max-w-[1700px] flex-col items-center">
+        {/* ╔════════════════════════════════╗
+           ║  [1] BLOK TYTUŁU              ║
+           ║  ↓ ZMIEŃ TITLE_TOP_OFFSET ↓   ║
+           ╚════════════════════════════════╝ */}
+        <motion.div
+          className="shrink-0"
+          style={{ paddingTop: TITLE_TOP_OFFSET }}
+          initial={{ y: -36, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 200, damping: 18, delay: 0.08 }}
         >
-          <StartFloatingBabel containerRef={containerRef} />
-        </div>
+          <MegaTitle />
+          <SubTitle />
+        </motion.div>
 
+        {/* ╔════════════════════════════════╗
+           ║  [2] STAGE: vinyl + Bąbel     ║
+           ╚════════════════════════════════╝ */}
         <div
-          className="flex min-h-0 items-end justify-center px-2 pb-[max(env(safe-area-inset-bottom),22px)] pt-4"
-          style={{ gridRow: 3, gridColumn: 1 }}
+          ref={stageRef}
+          className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden"
         >
-          <VinylButton
-            size={vinylSize}
-            spinOnHover
-            spinning={false}
-            onClick={onPlay}
-            ariaLabel="Start — naciśnij wielką płytę"
-            label="▶"
-          />
+          {/* Bąbel z dymkiem powoli dryfuje po całym obszarze stage */}
+          <FloatingBabel stageRef={stageRef} mascotSize={mascotSize} />
+
+          {/* CTA — wielki winyl + chip „Naciśnij Płytę" */}
+          <div className="relative z-20 flex flex-col items-center gap-[clamp(1rem,2.5dvh,2rem)]">
+            <div className="relative">
+              <GlowRing size={vinylSize} />
+              <VinylButton
+                size={vinylSize}
+                spinOnHover
+                spinning={false}
+                onClick={onPlay}
+                ariaLabel="Start — naciśnij wielką płytę"
+                label="▶"
+              />
+            </div>
+            <PressStartChip />
+          </div>
         </div>
       </div>
     </motion.div>
   );
 }
 
-type StartFloatingBabelProps = {
-  containerRef: RefObject<HTMLDivElement | null>;
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  HOOK: USTALANIE ROZMIARÓW                                ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
+function useStageSize({
+  vw,
+  vh,
+  min,
+  max,
+}: {
+  vw: number;
+  vh: number;
+  min: number;
+  max: number;
+}) {
+  const [size, setSize] = useState(Math.round((min + max) / 2));
+  useLayoutEffect(() => {
+    const calc = () => {
+      const s = Math.min(window.innerWidth * vw, window.innerHeight * vh);
+      setSize(Math.min(max, Math.max(min, Math.round(s))));
+    };
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, [vw, vh, min, max]);
+  return size;
+}
+
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  TYTUŁ + PODTYTUŁ                                         ║
+   ║  Wielkość fontu — `fontSize` w `style` poniżej.           ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
+function MegaTitle() {
+  const style: CSSProperties = {
+    fontFamily:
+      "'Bungee',Impact,Haettenschweiler,ui-sans-serif,system-ui,sans-serif",
+    // ↓ ZMIEŃ tutaj rozmiar napisu „DJ BAIBEL"
+    fontSize: "clamp(3.5rem, min(13vw, 24vh), 13rem)",
+    letterSpacing: "0.13em",
+    lineHeight: 1.55,
+    textTransform: "uppercase",
+    backgroundImage:
+      "linear-gradient(175deg,#fff8c9 0%,#fde68a 16%,#f9a8d4 38%,#d8b4fe 62%,#7e22ce 92%)",
+    WebkitBackgroundClip: "text",
+    backgroundClip: "text",
+    color: "transparent",
+    textShadow:
+      "0 14px 0 #0b0118, 0 28px 0 rgba(0,0,0,0.45), 0 0 80px rgba(168,85,247,0.85), 0 0 130px rgba(250,204,21,0.32)",
+  };
+
+  return (
+    <motion.h1
+      className="px-2 text-center font-black [-webkit-font-smoothing:antialiased]"
+      style={style}
+      animate={{ scale: [1, 1.018, 1] }}
+      transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+    >
+      DJ&nbsp;BAIBEL
+    </motion.h1>
+  );
+}
+
+function SubTitle() {
+  return (
+    <p
+      className="mt-3 text-center font-black uppercase tracking-[0.42em] text-cyan-200/85 drop-shadow-[0_3px_0_rgba(0,0,0,0.7)]"
+      // ↓ ZMIEŃ tutaj rozmiar napisu podtytułu
+      style={{ fontSize: "clamp(1rem, min(2vw, 2.4vh), 1.65rem)" }}
+    >
+      ★ Twoje pierwsze studio nagrań ★
+    </p>
+  );
+}
+
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  FLOATING BĄBEL — postać z dymkiem dryfująca po stage    ║
+   ║  Prędkość:  `time * 0.00045` w `useAnimationFrame`.      ║
+   ║  Zakres:    ResizeObserver na stage → max X/Y bounds.    ║
+   ║  pointer-events:none — żeby nie blokował klików w winyl. ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
+type FloatingBabelProps = {
+  stageRef: RefObject<HTMLDivElement | null>;
+  mascotSize: number;
 };
 
-function StartFloatingBabel({ containerRef }: StartFloatingBabelProps) {
-  const x = useMotionValue(12);
-  const y = useMotionValue(12);
-  const layout = useRef({ pad: 10, cw: 400, ch: 800 });
+function FloatingBabel({ stageRef, mascotSize }: FloatingBabelProps) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const x = useMotionValue(40);
+  const y = useMotionValue(40);
 
-  const [dialogueIndex, setDialogueIndex] = useState(0);
+  const layout = useRef({
+    pad: 24,
+    cw: 1000,
+    ch: 600,
+    w: mascotSize,
+    h: mascotSize * 1.5,
+  });
+
+  const [lineIdx, setLineIdx] = useState(0);
+  useEffect(() => {
+    const id = setInterval(
+      () => setLineIdx((i) => (i + 1) % LINES.length),
+      LINE_ROTATE_MS,
+    );
+    return () => clearInterval(id);
+  }, []);
 
   useLayoutEffect(() => {
-    const root = containerRef.current;
-    if (!root) return;
+    const stage = stageRef.current;
+    const wrap = wrapRef.current;
+    if (!stage || !wrap) return;
     const update = () => {
-      const r = root.getBoundingClientRect();
+      const r = stage.getBoundingClientRect();
+      const w = wrap.getBoundingClientRect();
       layout.current.cw = r.width;
       layout.current.ch = r.height;
+      if (w.width > 0) layout.current.w = w.width;
+      if (w.height > 0) layout.current.h = w.height;
     };
     update();
     const ro = new ResizeObserver(update);
-    ro.observe(root);
+    ro.observe(stage);
+    ro.observe(wrap);
     return () => ro.disconnect();
-  }, [containerRef]);
+  }, [stageRef, mascotSize]);
 
   useAnimationFrame((time) => {
-    const { pad, cw, ch } = layout.current;
-    const w = Math.min(MASCOT_BOUNDS_W, cw - pad * 2);
-    const h = Math.min(MASCOT_BOUNDS_H, ch - pad * 2);
+    const { pad, cw, ch, w, h } = layout.current;
     const maxX = Math.max(pad, cw - w - pad);
     const maxY = Math.max(pad, ch - h - pad);
     if (maxX <= pad || maxY <= pad) return;
 
-    const u = time * 0.001;
-
+    // Bardzo wolny lissajous — zwiększ mnożnik (np. 0.001) aby przyspieszyć.
+    const u = time * 0.00045;
     const normX =
       0.5 +
-      0.48 * Math.sin(u * DRIFT_AX) * Math.cos(u * (DRIFT_AX * 0.28)) +
-      0.08 * Math.sin(u * DRIFT_SECONDARY);
+      0.46 * Math.sin(u * 0.62) * Math.cos(u * 0.18) +
+      0.05 * Math.sin(u * 1.7);
     const normY =
       0.5 +
-      0.48 * Math.cos(u * DRIFT_AY + 1.15) * Math.sin(u * (DRIFT_AY * 0.22)) +
-      0.08 * Math.sin(u * (DRIFT_SECONDARY * 1.2) + 0.5);
+      0.42 * Math.cos(u * 0.49 + 1.15) * Math.sin(u * 0.13) +
+      0.05 * Math.sin(u * 1.4 + 0.7);
 
-    const nx = pad + (maxX - pad) * normX + JITTER_AX * Math.sin(u * 3.05);
-    const ny = pad + (maxY - pad) * normY + JITTER_AX * Math.sin(u * 3.55 + 0.9);
-
-    x.set(Math.min(maxX, Math.max(pad, nx)));
-    y.set(Math.min(maxY, Math.max(pad, ny)));
+    x.set(pad + (maxX - pad) * Math.min(1, Math.max(0, normX)));
+    y.set(pad + (maxY - pad) * Math.min(1, Math.max(0, normY)));
   });
-
-  const bumpLine = useCallback(() => {
-    setDialogueIndex((i) => (i + 1) % DIALOGUE_LINES.length);
-  }, []);
-
-  useEffect(() => {
-    const id = window.setInterval(bumpLine, LINES_ROTATE_MS);
-    return () => window.clearInterval(id);
-  }, [bumpLine]);
 
   return (
     <motion.div
-      className="pointer-events-none absolute left-0 top-0 z-50 flex w-[min(88vw,18rem)] max-w-[18rem] flex-col items-center sm:max-w-[19rem]"
-      style={{ x, y }}
+      ref={wrapRef}
+      className="pointer-events-none absolute left-0 top-0 z-30 flex flex-col items-center"
+      style={{ x, y, width: "auto" }}
     >
-      <ThoughtCloud key={dialogueIndex} line={DIALOGUE_LINES[dialogueIndex]} />
+      <SpeechBubble line={LINES[lineIdx]} idx={lineIdx} />
+      <Mascot size={mascotSize} />
+    </motion.div>
+  );
+}
+
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  DYMEK + MASKOTKA                                         ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
+function SpeechBubble({ line, idx }: { line: string; idx: number }) {
+  return (
+    <div className="relative w-[clamp(20rem,min(34vw,42vh),28rem)] shrink-0">
+      <div className="relative overflow-hidden rounded-[2.25rem] border-[7px] border-black bg-linear-to-br from-sky-100 via-white to-amber-50 px-7 py-5 text-center shadow-[0_14px_0_0_black] ring-[5px] ring-cyan-400/70">
+        <AnimatePresence mode="wait">
+          <motion.p
+            key={idx}
+            className="min-h-[3rem] text-balance font-sans font-black leading-snug tracking-wide text-zinc-900"
+            style={{ fontSize: "clamp(1.15rem, min(2vw, 2.4vh), 1.85rem)" }}
+            initial={{ opacity: 0, y: 12, filter: "blur(4px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: -12, filter: "blur(4px)" }}
+            transition={{ duration: 0.32 }}
+          >
+            {line}
+          </motion.p>
+        </AnimatePresence>
+      </div>
+      {/* dziubek dymka */}
+      <div className="mx-auto flex flex-col items-center">
+        <span className="size-5 rotate-45 border-b-[7px] border-r-[7px] border-black bg-white" />
+      </div>
+    </div>
+  );
+}
+
+function Mascot({ size }: { size: number }) {
+  return (
+    <motion.div
+      className="relative shrink-0"
+      style={{ width: size }}
+      animate={{ rotate: [-3, 3, -3] }}
+      transition={{ duration: 4.6, repeat: Infinity, ease: "easeInOut" }}
+    >
+      {/* aura wokół Bąbla */}
+      <motion.div
+        className="absolute inset-[-15%] rounded-full bg-violet-500/35 blur-2xl"
+        animate={{ scale: [1, 1.1, 1], opacity: [0.6, 0.95, 0.6] }}
+        transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+      />
       <img
         src="/babel-mascot.png"
         alt="Bąbel"
         draggable={false}
-        className="relative z-[1] mt-[6px] w-[min(38vmin,15rem)] max-w-[90%] select-none drop-shadow-[0_18px_0_rgba(0,0,0,0.55)] sm:w-[min(36vmin,17rem)]"
+        className="relative z-[1] block h-auto w-full select-none drop-shadow-[0_18px_0_rgba(0,0,0,0.55)]"
       />
     </motion.div>
   );
 }
 
-function ThoughtCloud({ line }: { line: string }) {
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  CTA: glow ring + chip „Naciśnij Płytę"                   ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
+function GlowRing({ size }: { size: number }) {
+  const d = size + 80;
   return (
     <motion.div
-      className="relative z-[2] w-full"
-      layout
-      initial={{ scale: 0.62, opacity: 0, y: 26 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
-      transition={{ type: "spring", stiffness: 420, damping: 26, mass: 0.55 }}
+      className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+      style={{
+        width: d,
+        height: d,
+        background:
+          "radial-gradient(circle, rgba(250,204,21,0.42) 0%, rgba(168,85,247,0.32) 45%, transparent 72%)",
+      }}
+      animate={{ scale: [1, 1.16, 1], opacity: [0.55, 0.95, 0.55] }}
+      transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+    />
+  );
+}
+
+function PressStartChip() {
+  return (
+    <motion.div
+      className="rounded-full border-[6px] border-black bg-linear-to-r from-fuchsia-500 via-yellow-400 to-cyan-400 px-[clamp(1.5rem,2.4vw,2.5rem)] py-[clamp(0.6rem,1.2dvh,1rem)] font-black uppercase tracking-[0.3em] text-black shadow-[0_10px_0_0_black]"
+      style={{ fontSize: "clamp(1rem, min(1.7vw, 2vh), 1.5rem)" }}
+      animate={{ scale: [1, 1.05, 1] }}
+      transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
     >
-      <div className="relative rounded-[2.25rem] border-[6px] border-black bg-linear-to-br from-sky-100 via-white to-amber-100 px-5 py-4 text-center shadow-[0_14px_0_0_black] ring-4 ring-cyan-400/80">
-        <motion.p
-          className="min-h-[2.5rem] text-balance font-sans text-[clamp(1.02rem,3.9vmin,1.48rem)] font-extrabold leading-snug tracking-wide text-zinc-900"
-          initial={{ opacity: 0, y: 10, filter: "blur(6px)" }}
-          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-          transition={{ type: "spring", stiffness: 380, damping: 22, delay: 0.05 }}
-        >
-          {line}
-        </motion.p>
-      </div>
+      ► Naciśnij Płytę ◄
     </motion.div>
+  );
+}
+
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  DEKORACJE: latające nutki + PASEK PULSACJI (EQ bars)    ║
+   ║  → wysokość paska zmień w `EQ_BARS_HEIGHT` u góry pliku.  ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
+function srand(seed: number) {
+  const x = Math.sin(seed * 127.1 + seed * 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+const NOTE_GLYPHS = ["\u266A", "\u266B", "\u266C", "\u2605", "\u2726", "\u2669"];
+
+function FloatingNotes() {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[1] overflow-hidden">
+      {Array.from({ length: 14 }, (_, i) => {
+        const char =
+          NOTE_GLYPHS[Math.floor(srand(i + 3) * NOTE_GLYPHS.length)];
+        const left = `${srand(i + 17) * 92 + 3}%`;
+        const size = 18 + srand(i + 31) * 26;
+        const dur = 11 + srand(i + 47) * 14;
+        const delay = srand(i + 61) * 9;
+        const sway = `${(srand(i + 79) - 0.5) * 60}px`;
+        const palette = [
+          "text-yellow-300/45",
+          "text-pink-400/40",
+          "text-cyan-300/45",
+          "text-purple-400/40",
+          "text-white/30",
+        ];
+        const color = palette[Math.floor(srand(i + 99) * palette.length)];
+
+        return (
+          <motion.span
+            key={i}
+            className={`absolute select-none ${color}`}
+            style={{ left, bottom: "-6%", fontSize: size }}
+            animate={{
+              y: ["0vh", "-115vh"],
+              x: ["0px", sway],
+              rotate: [0, srand(i + 111) * 320 - 160],
+              opacity: [0, 0.75, 0.55, 0],
+            }}
+            transition={{
+              duration: dur,
+              repeat: Infinity,
+              ease: "linear",
+              delay,
+              times: [0, 0.08, 0.75, 1],
+            }}
+          >
+            {char}
+          </motion.span>
+        );
+      })}
+    </div>
+  );
+}
+
+function EqBars() {
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] flex items-end justify-center gap-[clamp(3px,0.7vw,8px)] px-4 opacity-55"
+      style={{ height: EQ_BARS_HEIGHT }}
+    >
+      {Array.from({ length: EQ_BARS_COUNT }, (_, i) => (
+        <motion.span
+          key={i}
+          className="flex-1 rounded-t-md bg-linear-to-t from-purple-700 via-pink-500 to-yellow-300 ring-2 ring-black/40 shadow-[0_-6px_24px_rgba(168,85,247,0.45)]"
+          style={{ height: `${30 + srand(i + 200) * 70}%` }}
+          animate={{ scaleY: [0.3, 1, 0.3] }}
+          transition={{
+            duration: 0.5 + srand(i + 250) * 0.9,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: srand(i + 300) * 1.4,
+          }}
+        />
+      ))}
+    </div>
   );
 }

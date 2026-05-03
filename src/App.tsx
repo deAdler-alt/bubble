@@ -1,7 +1,19 @@
+/**
+ * AI DJ Bąbel — root.
+ *  ┌─────────────────────────────────────────┐
+ *  │  DJBoothBackdrop (tło sceny)            │
+ *  │  AnimatePresence -> bieżący ekran:      │
+ *  │     START / NAGRYWANIE / STYL /          │
+ *  │     LADOWANIE / ODTWARZACZ              │
+ *  └─────────────────────────────────────────┘
+ *
+ *  Uwaga: wcześniej tu siedział "App-level Bąbel" w lewym dolnym rogu.
+ *  Został usunięty — Bąbel z dymkiem żyje teraz tylko na StartScreen.
+ */
+
 import { useCallback, useState } from "react";
 import { AnimatePresence, LayoutGroup } from "framer-motion";
 import type { GeneratedSong, SongStyle } from "./api/djApi";
-import { BabelCompanion } from "./components/BabelCompanion";
 import { DJBoothBackdrop } from "./components/DJBoothBackdrop";
 import { LoadingScreen } from "./screens/LoadingScreen";
 import { PlayerScreen } from "./screens/PlayerScreen";
@@ -15,17 +27,6 @@ type AppScreen =
   | "STYL"
   | "LADOWANIE"
   | "ODTWARZACZ";
-
-const BABEL_COPY: Record<AppScreen, string> = {
-  START:
-    "Cześć! Jestem Bąbel! Zróbmy razem super piosenkę! Naciśnij wielką płytę!",
-  NAGRYWANIE:
-    "O czym będzie piosenka? Naciśnij mikrofon i powiedz mi!",
-  STYL: "Super pomysł! Wybierz teraz obrazek z muzyką!",
-  LADOWANIE: "Czary mary, miksuję dźwięki! Poczekaj chwilkę...",
-  ODTWARZACZ:
-    "Wow, ale hit! Jesteś prawdziwym DJ-em! Posłuchajmy!",
-};
 
 export default function App() {
   const [screen, setScreen] = useState<AppScreen>("START");
@@ -45,17 +46,14 @@ export default function App() {
     setScreen("START");
   }, []);
 
-  const babelDock =
-    screen === "ODTWARZACZ"
-      ? "fixed left-1/2 top-[min(14vh,112px)] z-30 w-[min(96vw,28rem)] -translate-x-1/2 px-4"
-      : "fixed bottom-[max(env(safe-area-inset-bottom),20px)] left-[max(env(safe-area-inset-left),18px)] z-30 max-w-[min(96vw,24rem)] sm:bottom-10 sm:left-10";
-
   return (
     <LayoutGroup id="dj-layout">
-      <div className="relative min-h-[100dvh] font-sans text-black">
+      <div className="relative h-[100dvh] w-full font-sans text-black">
+        {/* TŁO SCENY (gradient + reflektory + disco-ball + podłoga) */}
         <DJBoothBackdrop />
 
-        <div className="relative z-[2] flex min-h-[100dvh] w-full min-w-0 flex-col">
+        {/* WARSTWA EKRANÓW */}
+        <div className="relative z-[2] flex h-full w-full min-w-0 flex-col">
           <AnimatePresence mode="wait">
             {screen === "START" ? (
               <StartScreen key="ev-start" onPlay={() => setScreen("NAGRYWANIE")} />
@@ -95,15 +93,6 @@ export default function App() {
               <PlayerScreen key="ev-play" song={song} onRestart={restart} />
             ) : null}
           </AnimatePresence>
-
-          {screen !== "START" ? (
-            <BabelCompanion
-              layoutId="babel-shell"
-              className={babelDock}
-              message={BABEL_COPY[screen]}
-              mode={screen === "ODTWARZACZ" ? "singing" : "default"}
-            />
-          ) : null}
         </div>
       </div>
     </LayoutGroup>

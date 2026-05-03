@@ -1,11 +1,16 @@
+/**
+ * "Big-button game UI" winyl — ciężka rama, wytarte rowki, kolorowa naklejka,
+ * środek-spindle. `spinning` (player) lub `spinOnHover` (CTA).
+ */
+
 import { motion } from "framer-motion";
 
 type VinylButtonProps = {
   onClick?: () => void;
   size?: number;
-  /** Continuous spin (e.g. player). Mutually exclusive with `spinOnHover`. */
+  /** Continuous spin (np. player). Wyklucza się z `spinOnHover`. */
   spinning?: boolean;
-  /** Grooves spin only while hovered (long smooth rotation). */
+  /** Rowki kręcą się tylko przy hoverze. */
   spinOnHover?: boolean;
   className?: string;
   label?: string;
@@ -14,9 +19,9 @@ type VinylButtonProps = {
   disabled?: boolean;
 };
 
-const spring = { type: "spring" as const, stiffness: 400, damping: 18 };
+const spring = { type: "spring" as const, stiffness: 380, damping: 22 };
 
-const grooveHoverVariants = {
+const grooveHover = {
   rest: { rotate: 0 },
   hover: {
     rotate: 360,
@@ -24,15 +29,15 @@ const grooveHoverVariants = {
   },
 };
 
-const buttonScaleVariants = {
+const buttonScale = {
   rest: { scale: 1 },
-  hover: { scale: 1.06 },
-  tap: { scale: 0.94 },
+  hover: { scale: 1.05, y: -4 },
+  tap: { scale: 0.94, y: 0 },
 };
 
 export function VinylButton({
   onClick,
-  size = 200,
+  size = 240,
   spinning = false,
   spinOnHover = false,
   className = "",
@@ -41,7 +46,8 @@ export function VinylButton({
   ariaLabel,
   disabled = false,
 }: VinylButtonProps) {
-  const variantHoverGrooves = spinOnHover && !spinning && !disabled;
+  const grooveOnHoverActive = spinOnHover && !spinning && !disabled;
+  const ringWidth = Math.max(8, Math.round(size * 0.04));
 
   return (
     <motion.button
@@ -50,27 +56,41 @@ export function VinylButton({
       aria-label={ariaLabel}
       onClick={onClick}
       className={[
-        "relative shrink-0 cursor-pointer rounded-full border-[6px] border-black bg-zinc-900 p-0 shadow-[0_12px_0_0_rgba(0,0,0,0.85)] outline-none focus-visible:ring-4 focus-visible:ring-yellow-300 disabled:pointer-events-none disabled:opacity-50",
+        "relative shrink-0 cursor-pointer rounded-full p-0 outline-none focus-visible:ring-[6px] focus-visible:ring-yellow-300 disabled:pointer-events-none disabled:opacity-50",
         className,
       ].join(" ")}
       style={{ width: size, height: size }}
       initial="rest"
       whileHover={disabled ? undefined : "hover"}
       whileTap={disabled ? undefined : "tap"}
-      variants={disabled ? undefined : buttonScaleVariants}
+      variants={disabled ? undefined : buttonScale}
       transition={spring}
     >
-      <motion.span
-        className="pointer-events-none absolute inset-2 rounded-full"
+      {/* outer rim — chunky bevel */}
+      <span
+        className="absolute inset-0 rounded-full bg-zinc-950"
         style={{
-          background:
-            "repeating-conic-gradient(from 0deg, #18181b 0deg 4deg, #27272a 4deg 8deg)",
+          boxShadow:
+            "0 18px 0 0 rgba(0,0,0,0.85), inset 0 -8px 16px rgba(0,0,0,0.7), inset 0 6px 14px rgba(255,255,255,0.18), 0 0 60px rgba(168,85,247,0.45)",
+          border: `${ringWidth}px solid #000`,
         }}
-        variants={variantHoverGrooves ? grooveHoverVariants : undefined}
+      />
+
+      {/* grooves */}
+      <motion.span
+        className="pointer-events-none absolute rounded-full"
+        style={{
+          inset: ringWidth + 6,
+          background:
+            "repeating-conic-gradient(from 0deg, #18181b 0deg 4deg, #2a2a31 4deg 8deg)",
+          boxShadow:
+            "inset 0 0 30px rgba(0,0,0,0.6), inset 0 0 8px rgba(255,255,255,0.08)",
+        }}
+        variants={grooveOnHoverActive ? grooveHover : undefined}
         animate={
           spinning
             ? { rotate: 360 }
-            : variantHoverGrooves
+            : grooveOnHoverActive
               ? undefined
               : { rotate: 0 }
         }
@@ -80,18 +100,35 @@ export function VinylButton({
             : undefined
         }
       />
+
+      {/* highlight sweep on top half */}
       <span
-        className="pointer-events-none absolute inset-[18%] rounded-full border-4 border-black/60"
+        className="pointer-events-none absolute rounded-full opacity-60 mix-blend-screen"
         style={{
+          inset: ringWidth + 4,
           background:
-            "conic-gradient(from 180deg, #f472b6, #a78bfa, #38bdf8, #fbbf24, #f472b6)",
+            "conic-gradient(from 220deg, transparent 0deg, rgba(255,255,255,0.16) 30deg, transparent 90deg, transparent 360deg)",
         }}
       />
-      <span className="pointer-events-none absolute left-1/2 top-1/2 flex size-[28%] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-4 border-black bg-white text-3xl shadow-inner">
-        {children ??
-          (label ? (
-            <span className="text-lg font-black text-black">{label}</span>
-          ) : null)}
+
+      {/* label sticker */}
+      <span
+        className="pointer-events-none absolute rounded-full border-[5px] border-black"
+        style={{
+          inset: "22%",
+          background:
+            "conic-gradient(from 200deg, #f472b6, #fbbf24, #38bdf8, #a78bfa, #f472b6)",
+          boxShadow:
+            "inset 0 -6px 14px rgba(0,0,0,0.45), inset 0 4px 10px rgba(255,255,255,0.35), 0 0 22px rgba(168,85,247,0.45)",
+        }}
+      />
+
+      {/* spindle hole + glyph */}
+      <span
+        className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-[5px] border-black bg-white shadow-[inset_0_3px_8px_rgba(0,0,0,0.35)]"
+        style={{ width: "28%", height: "28%", fontSize: Math.round(size * 0.18) }}
+      >
+        {children ?? (label ? <span className="font-black text-black drop-shadow-[0_2px_0_rgba(0,0,0,0.25)]">{label}</span> : null)}
       </span>
     </motion.button>
   );

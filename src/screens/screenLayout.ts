@@ -1,20 +1,23 @@
 /**
- * Wspólna rama widoków — pełny viewport, brak scrolla, safe area.
- * Na ekranach z fixed Bąblem (wszystko poza START) użyj też `SCREEN_BABEL_RESERVE`.
+ * Wspólna rama widoków — desktop-first, brak scrolla, safe area.
+ * NIE rezerwujemy już miejsca pod „App-level Bąbla" (został usunięty).
  */
 
 export const SCREEN_OUTER =
   "relative h-[100dvh] w-full min-h-0 overflow-hidden";
 
 export const SCREEN_PAD_X =
-  "pl-[max(env(safe-area-inset-left),14px)] pr-[max(env(safe-area-inset-right),14px)]";
+  "pl-[max(env(safe-area-inset-left),24px)] pr-[max(env(safe-area-inset-right),24px)]";
 
-/** Zapas pod fixed `BabelCompanion` w rogu / na dołu. */
-export const SCREEN_BABEL_RESERVE =
-  "pb-[clamp(6.5rem,26dvh,12.5rem)]";
+/** Zapas pod safe-area na dole (telefony z notchem etc). */
+export const SCREEN_PAD_B =
+  "pb-[max(env(safe-area-inset-bottom),20px)]";
 
-/** START: brak towarzysza App-level. */
+/** START — bez Bąbla App-level (wcześniej miało osobny tryb). */
 export const screenStartRoot = `${SCREEN_OUTER} ${SCREEN_PAD_X}`;
 
-/** Pozostałe kroki przepływu. */
-export const screenFlowRoot = `${SCREEN_OUTER} ${SCREEN_PAD_X} ${SCREEN_BABEL_RESERVE}`;
+/** RECORDING / STYL / ŁADOWANIE — pełny ekran. */
+export const screenFlowRoot = `${SCREEN_OUTER} ${SCREEN_PAD_X} ${SCREEN_PAD_B}`;
+
+/** PLAYER — pełny ekran. */
+export const screenPlayerRoot = `${SCREEN_OUTER} ${SCREEN_PAD_X} ${SCREEN_PAD_B}`;

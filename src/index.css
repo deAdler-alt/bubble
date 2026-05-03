@@ -8,6 +8,10 @@ html,
 body,
 #root {
   height: 100%;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
 body {

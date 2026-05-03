@@ -1,12 +1,19 @@
 {
   "name": "ai-dj-babel",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
+  "workspaces": ["server"],
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port 5173 --strictPort",
+    "dev:server": "npm run dev --workspace server",
+    "dev:all": "concurrently --names \"WEB,API\" --prefix-colors \"cyan,magenta\" \"npm:dev\" \"npm:dev:server\"",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "build:server": "npm run build --workspace server",
+    "build:all": "npm run build && npm run build:server",
+    "preview": "vite preview --port 4173 --strictPort",
+    "start:server": "npm run start --workspace server",
+    "typecheck": "tsc --noEmit && npm run typecheck --workspace server"
   },
   "dependencies": {
     "framer-motion": "^12.38.0",
@@ -19,6 +26,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.4",
+    "concurrently": "^9.1.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.17",
     "typescript": "~5.8.3",

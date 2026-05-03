@@ -1,87 +1,156 @@
 /**
- * Wyłączona warstwa API — symulacja sieci przez setTimeout.
- * Backend podmienia implementacje; UI importuje wyłącznie stąd.
+ * Klient HTTP do backendu AI DJ Bąbel.
+ * Dev: proxy `/api` z vite.config.ts (-> :3001).
+ * Prod: ustaw `VITE_API_BASE_URL`.
+ *
+ * STT i TTS dzieją się w `lib/recording.ts` + `lib/speech.ts` (browser-side
+ * MediaRecorder + SpeechSynthesis). Audio dziecka → backend (Groq Whisper).
  */
 
 export type SongStyle = "rock" | "kolysanka" | "pop" | "hiphop";
 
-/** Publiczny próbnik MP3 (MDN) — działa w przeglądarce dla odtwarzacza mock. */
-export const MOCK_SONG_AUDIO_URL =
-  "https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3";
-
-/** Drugi adres na mock ElevenLabs (ten sam lub krótki sample). */
-export const MOCK_BABEL_VOICE_AUDIO_URL =
-  "https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3";
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Symulacja włączenia mikrofonu. */
-export function startRecordingSTT(): Promise<void> {
-  return delay(520);
-}
-
-export type StopRecordingResult = {
-  transcript: string;
-};
-
-/** Symulacja STT po zatrzymaniu nagrania — zwraca polski tekst. */
-export async function stopRecordingSTT(
-  _audioBlob?: Blob | null,
-): Promise<StopRecordingResult> {
-  await delay(720);
-  return {
-    transcript: "Piosenka o wielkim kocie",
-  };
-}
+export const SONG_STYLES: readonly SongStyle[] = [
+  "rock",
+  "kolysanka",
+  "pop",
+  "hiphop",
+] as const;
 
 export type GeneratedSong = {
   audioUrl: string;
   lyrics: string[];
-  title?: string;
+  title: string;
+  style: SongStyle;
+  durationMs: number;
 };
 
-const styleTitles: Record<SongStyle, string> = {
-  rock: "Rockowy koci hit",
-  kolysanka: "Słodka kołysanka",
-  pop: "Popowy błysk",
-  hiphop: "Hip-hopowy żarcik",
+export type TranscribeResult = {
+  transcript: string;
 };
 
-const baseLyrics: string[] = [
-  "Oo-oo!",
-  "Wielki kot idzie spacerkiem!",
-  "Bąś i ja — na parkiecie!",
-  "Śmiechy, skoki, sto punktów!",
-  "Znów ten hit — gramy jeszcze raz!",
-];
+const BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 
-function lyricsFor(prompt: string, style: SongStyle): string[] {
-  const hint = prompt.trim().slice(0, 32) || "Nasz kot";
-  return [
-    `(${styleTitles[style]})`,
-    hint + "!",
-    ...baseLyrics,
-  ];
+export class ApiError extends Error {
+  status: number;
+  payload?: unknown;
+  constructor(message: string, status: number, payload?: unknown) {
+    super(message);
+    this.status = status;
+    this.payload = payload;
+    this.name = "ApiError";
+  }
 }
 
-/** Symulacja generowania piosenki przez AI. */
+async function jsonRequest<T>(
+  path: string,
+  init?: RequestInit & { signal?: AbortSignal },
+): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    const payload = await safeJson(res);
+    throw new ApiError(
+      apiMessage(payload, `API ${path} -> ${res.status}`),
+      res.status,
+      payload,
+    );
+  }
+  return (await res.json()) as T;
+}
+
+async function multipartRequest<T>(
+  path: string,
+  formData: FormData,
+  signal?: AbortSignal,
+): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    body: formData,
+    signal,
+  });
+  if (!res.ok) {
+    const payload = await safeJson(res);
+    throw new ApiError(
+      apiMessage(payload, `API ${path} -> ${res.status}`),
+      res.status,
+      payload,
+    );
+  }
+  return (await res.json()) as T;
+}
+
+/* ─────────────────────────────────────────────
+   Public API
+   ───────────────────────────────────────────── */
+
+/** Wysyła Blob audio na /api/transcribe → Groq Whisper → polski transkrypt. */
+export async function transcribeAudio(
+  audio: Blob,
+  signal?: AbortSignal,
+): Promise<TranscribeResult> {
+  const ext = pickExt(audio.type);
+  const fd = new FormData();
+  fd.append("audio", audio, `recording.${ext}`);
+  return multipartRequest<TranscribeResult>("/api/transcribe", fd, signal);
+}
+
+/** Generuje piosenkę: lyrics (Groq Llama / szablon) + audio URL z sampleBank. */
 export async function generateSong(
   prompt: string,
   style: SongStyle,
+  signal?: AbortSignal,
 ): Promise<GeneratedSong> {
-  await delay(3100);
-  return {
-    audioUrl: MOCK_SONG_AUDIO_URL,
-    lyrics: lyricsFor(prompt, style),
-    title: styleTitles[style],
-  };
+  return jsonRequest<GeneratedSong>("/api/songs", {
+    method: "POST",
+    body: JSON.stringify({ prompt, style }),
+    signal,
+  });
 }
 
-/** Symulacja ElevenLabs — zwraca adres audio dla podanego tekstu. */
-export async function getBabelVoice(text: string): Promise<{ audioUrl: string }> {
-  void text;
-  await delay(320);
-  return { audioUrl: MOCK_BABEL_VOICE_AUDIO_URL };
+export async function pingApi(): Promise<{
+  status: "ok";
+  uptimeMs: number;
+  startedAt: string;
+}> {
+  return jsonRequest("/api/health");
+}
+
+/* ─────────────────────────────────────────────
+   helpers
+   ───────────────────────────────────────────── */
+
+function pickExt(mimeType: string): string {
+  const m = mimeType.toLowerCase();
+  if (m.includes("webm")) return "webm";
+  if (m.includes("ogg")) return "ogg";
+  if (m.includes("mp4") || m.includes("m4a")) return "m4a";
+  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+  if (m.includes("wav")) return "wav";
+  return "webm";
+}
+
+async function safeJson(res: Response): Promise<unknown> {
+  try {
+    return await res.json();
+  } catch {
+    return undefined;
+  }
+}
+
+function apiMessage(payload: unknown, fallback: string): string {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "message" in payload &&
+    typeof (payload as { message: unknown }).message === "string"
+  ) {
+    return (payload as { message: string }).message;
+  }
+  return fallback;
 }
