@@ -1,10 +1,17 @@
 /**
  * AI DJ Bąbel — backend (Fastify + TS).
+ *
+ * KRYTYCZNE: `dotenv/config` MUSI być pierwszy import.
+ * Inaczej `lib/groq.ts` (importowany niżej) widzi pusty process.env i działa
+ * w trybie fallback, mimo że `server/.env` ma GROQ_API_KEY.
+ *
  * Endpointy:
  *   GET  /api/health
  *   POST /api/transcribe   (multipart audio → transcript via Groq Whisper)
  *   POST /api/songs        ({prompt, style} → {audioUrl, lyrics, title, ...})
  */
+
+import "dotenv/config";
 
 import Fastify from "fastify";
 import cors from "@fastify/cors";

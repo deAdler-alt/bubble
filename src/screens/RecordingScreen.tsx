@@ -46,8 +46,13 @@ type Phase =
   | "recording"
   | "uploading"
   | "permission-denied"
+  | "blocked-os"
   | "unsupported"
   | "error";
+
+const IS_MAC =
+  typeof navigator !== "undefined" &&
+  /mac/i.test(navigator.platform || navigator.userAgent || "");
 
 export function RecordingScreen({ onRecordingDone }: RecordingScreenProps) {
   const recorder = useMediaRecorder();
@@ -60,7 +65,12 @@ export function RecordingScreen({ onRecordingDone }: RecordingScreenProps) {
   async function handleMicPress() {
     if (phase === "uploading" || phase === "asking-permission") return;
 
-    if (phase === "idle" || phase === "error") {
+    if (
+      phase === "idle" ||
+      phase === "error" ||
+      phase === "permission-denied" ||
+      phase === "blocked-os"
+    ) {
       setErrorMsg(null);
       setPhase("asking-permission");
       try {
@@ -68,10 +78,17 @@ export function RecordingScreen({ onRecordingDone }: RecordingScreenProps) {
         setPhase("recording");
       } catch (err) {
         const e = err as DOMException;
-        if (e.name === "NotAllowedError" || e.name === "SecurityError") {
+        if (e.name === "TimeoutError") {
+          setPhase("blocked-os");
+          setErrorMsg(
+            IS_MAC
+              ? "macOS blokuje mikrofon. Otwórz: Ustawienia systemowe → Prywatność i bezpieczeństwo → Mikrofon → włącz dostęp dla swojej przeglądarki, potem zrestartuj przeglądarkę."
+              : "System blokuje mikrofon. Sprawdź ustawienia prywatności systemu i odblokuj dostęp przeglądarce.",
+          );
+        } else if (e.name === "NotAllowedError" || e.name === "SecurityError") {
           setPhase("permission-denied");
           setErrorMsg(
-            "Pozwól na mikrofon w pasku adresu przeglądarki, potem spróbuj ponownie.",
+            "Mikrofon zablokowany. Kliknij ikonę kłódki/kamery w pasku adresu (po lewej od URL) → Mikrofon → Zezwól, potem odśwież stronę.",
           );
         } else {
           setPhase("error");
@@ -152,6 +169,7 @@ const HEADER_TEXTS: Record<Phase, string> = {
   recording: "SŁUCHAM CIĘ!",
   uploading: "WYSYŁAM DO STUDIA…",
   "permission-denied": "BRAK DOSTĘPU",
+  "blocked-os": "MIKROFON ZABLOKOWANY",
   unsupported: "TWOJA PRZEGLĄDARKA NIE WSPIERA",
   error: "OPS! SPRÓBUJ JESZCZE RAZ",
 };
@@ -259,7 +277,8 @@ const PHASE_LABELS: Record<Phase, string> = {
   "asking-permission": "Czekam na pozwolenie…",
   recording: "● Nagrywam — naciśnij ponownie aby zakończyć",
   uploading: "Wysyłam do Bąbla…",
-  "permission-denied": "✕ Mikrofon zablokowany",
+  "permission-denied": "✕ Kliknij i spróbuj jeszcze raz",
+  "blocked-os": "✕ Sprawdź System Settings",
   unsupported: "✕ Włącz w Chrome lub Edge",
   error: "✕ Błąd — naciśnij mikrofon żeby spróbować",
 };

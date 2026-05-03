@@ -1,6 +1,12 @@
 /**
  * useMediaRecorder — cienki hook nad `navigator.mediaDevices.getUserMedia`
- * + `MediaRecorder`. Trzyma pełną maszynę stanów oraz produkuje finalny Blob.
+ * + `MediaRecorder`. Trzyma pełną maszynę stanów, dostarcza Blob.
+ *
+ * Defensywne mechanizmy (po doświadczeniach z macOS Chrome):
+ *   - pre-check `Permissions API` → jeśli "denied", od razu zgłaszamy stan
+ *     "denied" zamiast czekać na nigdy-nie-pojawiający-się prompt
+ *   - 8-sekundowy timeout na `getUserMedia` → jeśli macOS nie dał kropki w
+ *     System Settings, prompt nigdy nie wyskoczy; przerywamy i mówimy o tym.
  *
  * Użycie:
  *   const rec = useMediaRecorder();
@@ -16,6 +22,7 @@ export type RecorderState =
   | "recording"
   | "stopping"
   | "denied"
+  | "blocked-os"
   | "unsupported"
   | "error";
 
@@ -26,12 +33,37 @@ const PREFERRED_MIME_TYPES = [
   "audio/mp4",
 ];
 
+const PERMISSION_TIMEOUT_MS = 8000;
+
 function pickMimeType(): string {
   if (typeof MediaRecorder === "undefined") return "audio/webm";
   for (const m of PREFERRED_MIME_TYPES) {
     if (MediaRecorder.isTypeSupported(m)) return m;
   }
   return "audio/webm";
+}
+
+/**
+ * Sprawdza czy mikrofon jest "zablokowany" przez wcześniejsze "Block".
+ * Zwraca:
+ *   - "granted" → masz dostęp, prompt nie wyskoczy
+ *   - "denied"  → user zablokował (lub macOS), trzeba odblokować
+ *   - "prompt"  → prompt wyskoczy przy getUserMedia
+ *   - "unknown" → przeglądarka nie wspiera Permissions API dla mikrofonu
+ */
+async function probeMicPermission(): Promise<
+  "granted" | "denied" | "prompt" | "unknown"
+> {
+  try {
+    if (!navigator.permissions?.query) return "unknown";
+    // TS jeszcze nie zna PermissionName "microphone" w lib.dom.d.ts
+    const status = await navigator.permissions.query({
+      name: "microphone" as PermissionName,
+    });
+    return status.state as "granted" | "denied" | "prompt";
+  } catch {
+    return "unknown";
+  }
 }
 
 export function useMediaRecorder() {
@@ -51,7 +83,6 @@ export function useMediaRecorder() {
   const stopResolveRef = useRef<((blob: Blob) => void) | null>(null);
   const stopRejectRef = useRef<((err: Error) => void) | null>(null);
 
-  /** Sprzątnij strumień gdy komponent znika lub błąd. */
   useEffect(() => {
     return () => {
       stopResolveRef.current = null;
@@ -71,20 +102,55 @@ export function useMediaRecorder() {
       throw new Error("Nagrywanie już trwa.");
     }
     setError(null);
-    setState("requesting-permission");
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
-      const e = err as DOMException;
-      const denied =
-        e.name === "NotAllowedError" || e.name === "SecurityError";
-      setError(e.message || "Brak dostępu do mikrofonu.");
-      setState(denied ? "denied" : "error");
+
+    // 1) Pre-check — jeśli Permissions API mówi "denied",
+    //    nie czekamy 8s, tylko od razu zgłaszamy denied.
+    const perm = await probeMicPermission();
+    if (perm === "denied") {
+      const e = new DOMException(
+        "Mikrofon zablokowany w ustawieniach przeglądarki.",
+        "NotAllowedError",
+      );
+      setError(e.message);
+      setState("denied");
       throw e;
     }
-    streamRef.current = stream;
 
+    setState("requesting-permission");
+
+    // 2) getUserMedia z timeoutem — chroni przed zawieszeniem na macOS
+    //    gdy Chrome/Edge nie ma OS-level mic access.
+    let stream: MediaStream;
+    try {
+      stream = await Promise.race([
+        navigator.mediaDevices.getUserMedia({ audio: true }),
+        new Promise<MediaStream>((_, rej) => {
+          window.setTimeout(() => {
+            rej(
+              new DOMException(
+                "Timeout: brak odpowiedzi od mikrofonu (sprawdź System Settings → Privacy → Microphone).",
+                "TimeoutError",
+              ),
+            );
+          }, PERMISSION_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (err) {
+      const e = err as DOMException;
+      if (e.name === "NotAllowedError" || e.name === "SecurityError") {
+        setError(e.message || "Brak dostępu do mikrofonu.");
+        setState("denied");
+      } else if (e.name === "TimeoutError") {
+        setError(e.message);
+        setState("blocked-os");
+      } else {
+        setError(e.message || "Błąd mikrofonu.");
+        setState("error");
+      }
+      throw e;
+    }
+
+    streamRef.current = stream;
     const mimeType = pickMimeType();
     const rec = new MediaRecorder(stream, { mimeType });
     recorderRef.current = rec;
@@ -136,7 +202,6 @@ export function useMediaRecorder() {
     });
   }, []);
 
-  /** Awaryjne anulowanie bez czekania na Blob. */
   const cancel = useCallback(() => {
     const rec = recorderRef.current;
     streamRef.current?.getTracks().forEach((t) => t.stop());
