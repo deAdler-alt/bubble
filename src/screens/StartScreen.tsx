@@ -27,14 +27,6 @@ import {
 } from "framer-motion";
 import { FlyingNotesOverlay } from "../components/FlyingNotesOverlay";
 import { VinylButton } from "../components/VinylButton";
-import {
-  PRIMARY_CTA_BORDER,
-  PRIMARY_CTA_BOX_SHADOW_KEYFRAMES,
-  PRIMARY_CTA_FOCUS,
-  PRIMARY_CTA_GRADIENT,
-  PRIMARY_CTA_SHADOW,
-  PRIMARY_CTA_TEXT,
-} from "../theme/primaryCta";
 import { screenStartRoot } from "./screenLayout";
 
 /* ╔════════════════════════════════════════════════════════════╗
@@ -107,7 +99,7 @@ export function StartScreen({ onPlay }: StartScreenProps) {
           <SpeakerRig reducedMotion={prefersReducedMotion} />
 
           {/* CTA — wielki winyl + chip „Naciśnij Płytę" */}
-          <div className="relative z-20 flex flex-col items-center gap-[clamp(1rem,2.5dvh,2rem)]">
+          <div className="relative z-20 flex flex-col items-center gap-[clamp(5rem,5dvh,5rem)]">
             <div className="relative">
               <GlowRing size={vinylSize} />
               <VinylButton
@@ -220,22 +212,30 @@ function GlowRing({ size }: { size: number }) {
 }
 
 function PressStartChip() {
+  const prefersReducedMotion = !!useReducedMotion();
+  const hover =
+    prefersReducedMotion
+      ? undefined
+      : {
+          scale: 1.06,
+          boxShadow:
+            "0 14px 0 0 rgba(0,0,0,1), 0 0 44px rgba(34,211,238,0.55), 0 0 72px rgba(34,211,238,0.38)",
+        };
+
   return (
     <motion.div
       className={[
         "rounded-[3rem] px-[clamp(1.5rem,2.4vw,2.5rem)] py-[clamp(0.6rem,1.2dvh,1rem)]",
-        PRIMARY_CTA_BORDER,
-        PRIMARY_CTA_GRADIENT,
-        PRIMARY_CTA_TEXT,
-        PRIMARY_CTA_SHADOW,
-        PRIMARY_CTA_FOCUS,
+        "border-[8px] border-cyan-400 bg-black",
+        "font-black uppercase tracking-[0.18em] text-cyan-200/85 drop-shadow-[0_3px_0_rgba(0,0,0,0.7)]",
+        "outline-none focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-cyan-200/80",
       ].join(" ")}
-      style={{ fontSize: "clamp(1rem, min(1.7vw, 2vh), 1.5rem)" }}
-      animate={{
-        scale: [1, 1.06, 1],
-        boxShadow: [...PRIMARY_CTA_BOX_SHADOW_KEYFRAMES],
+      style={{
+        fontSize: "clamp(1rem, min(1.7vw, 2vh), 1.5rem)",
+        boxShadow: "0 12px 0 0 rgba(0,0,0,0.95)",
       }}
-      transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
+      whileHover={hover}
+      transition={{ type: "spring", stiffness: 420, damping: 28 }}
     >
       ▶ Naciśnij Płytę ◀
     </motion.div>
@@ -312,7 +312,7 @@ function Speaker3D({
     >
       {/* ── Obudowa ─────────────────────────────────────────────── */}
       <motion.div
-        className="rounded-[10px] border-[3px] border-black bg-linear-to-b from-violet-700 to-indigo-950 px-[calc(var(--spk)*0.1)] py-[calc(var(--spk)*0.1)] shadow-[4px_4px_0_rgba(0,0,0,0.55)] shadow-[0_0_40px_rgba(224,64,251,0.45)]"
+        className="flex min-h-0 flex-col rounded-[10px] border-[3px] border-black bg-linear-to-b from-violet-700 to-indigo-950 px-[calc(var(--spk)*0.1)] py-[calc(var(--spk)*0.1)] shadow-[4px_4px_0_rgba(0,0,0,0.55)] shadow-[0_0_40px_rgba(224,64,251,0.45)]"
         style={{
           width: "calc(var(--spk) * 1)",
           height: "58dvh",
@@ -320,60 +320,63 @@ function Speaker3D({
         animate={reducedMotion ? undefined : { scale: [1, 1.03, 1] }}
         transition={{ duration: 0.5, repeat: Infinity, ease: "easeOut" }}
       >
-        {/* Tweeter */}
-        <div
-          className="mx-auto mb-[calc(var(--spk)*0.08)] rounded-full border-[3px] border-black bg-radial-[circle_at_35%_35%] from-violet-200 to-violet-800"
-          style={{
-            width:  "calc(var(--spk) * 0.22)",
-            height: "calc(var(--spk) * 0.22)",
-          }}
-        />
-
-        {/* Woofer */}
-        <div
-          className="relative mx-auto mb-[calc(var(--spk)*0.08)] rounded-full border-[3px] border-black bg-radial-[circle_at_35%_35%] from-violet-500 via-indigo-900 to-black"
-          style={{
-            width:  "calc(var(--spk) * 0.72)",
-            height: "calc(var(--spk) * 0.72)",
-          }}
-        >
-          {/* Pierścień stożka */}
-          <div className="absolute inset-[20%] rounded-full border border-white/20" />
-          {/* Dust cap */}
+        <div className="shrink-0">
+          {/* Tweeter */}
           <div
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-black bg-violet-300"
+            className="mx-auto mb-[calc(var(--spk)*0.08)] rounded-full border-[3px] border-black bg-radial-[circle_at_35%_35%] from-violet-200 to-violet-800"
             style={{
-              width:  "calc(var(--spk) * 0.18)",
-              height: "calc(var(--spk) * 0.18)",
+              width:  "calc(var(--spk) * 0.22)",
+              height: "calc(var(--spk) * 0.22)",
             }}
+          />
+
+          {/* Woofer */}
+          <div
+            className="relative mx-auto mb-[calc(var(--spk)*0.08)] rounded-full border-[3px] border-black bg-radial-[circle_at_35%_35%] from-violet-500 via-indigo-900 to-black"
+            style={{
+              width:  "calc(var(--spk) * 0.72)",
+              height: "calc(var(--spk) * 0.72)",
+            }}
+          >
+            {/* Pierścień stożka */}
+            <div className="absolute inset-[20%] rounded-full border border-white/20" />
+            {/* Dust cap */}
+            <div
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-black bg-violet-300"
+              style={{
+                width:  "calc(var(--spk) * 0.18)",
+                height: "calc(var(--spk) * 0.18)",
+              }}
+            />
+          </div>
+
+          {/* Port */}
+          <div
+            className="mx-auto h-4 rounded-full border-2 border-black bg-zinc-950"
+            style={{ width: "calc(var(--spk) * 0.58)" }}
           />
         </div>
 
-        {/* Port */}
-        <div
-          className="mx-auto h-4 rounded-full border-2 border-black bg-zinc-950"
-          style={{ width: "calc(var(--spk) * 0.58)" }}
-        />
-
-        {/* Paski VU */}
-        <div className="mt-[calc(var(--spk)*0.1)] flex justify-center gap-[calc(var(--spk)*0.04)]">
-          {barSeeds.map((seed) => (
-            <motion.span
-              key={seed}
-              className="rounded-t-sm border border-black/50 bg-linear-to-t from-fuchsia-500 to-cyan-300"
-              style={{
-                width:  "calc(var(--spk) * 0.07)",
-                height: `${16 + (seed % 3) * 12}px`,
-              }}
-              animate={reducedMotion ? undefined : { scaleY: [0.45, 1, 0.45] }}
-              transition={{
-                duration: 0.45 + (seed % 4) * 0.08,
-                repeat: Infinity,
-                ease: "easeInOut",
-                delay: seed * 0.06,
-              }}
-            />
-          ))}
+        {/* Paski VU — od podstawy portu do dolnej krawędzi obudowy */}
+        <div className="flex min-h-0 flex-1 flex-col pt-[calc(var(--spk)*0.1)]">
+          <div className="flex h-full min-h-0 justify-center gap-[calc(var(--spk)*0.04)]">
+            {barSeeds.map((seed) => (
+              <motion.span
+                key={seed}
+                className="min-h-[12px] self-stretch origin-bottom rounded-t-sm border border-black/50 bg-linear-to-t from-fuchsia-500 to-cyan-300"
+                style={{
+                  width: "calc(var(--spk) * 0.07)",
+                }}
+                animate={reducedMotion ? undefined : { scaleY: [0.52, 1, 0.52] }}
+                transition={{
+                  duration: 1.35 + (seed % 4) * 0.22,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: seed * 0.14,
+                }}
+              />
+            ))}
+          </div>
         </div>
       </motion.div>
 
