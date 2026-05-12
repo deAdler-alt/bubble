@@ -2,15 +2,36 @@
 <html lang="pl">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0a0420" />
+    <meta
+      name="description"
+      content="AI DJ Bąbel — opowiedz piosenkę, wybierz styl, zaśpiewaj karaoke. Procedural music + Web Speech."
+    />
     <title>AI DJ Bąbel</title>
+
+    <!-- Krytyczna ścieżka fontu: ustawiamy łącza i preload tylko na to, czego używamy. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Nunito: UI; Bungee: gigantyczny tytuł „jak w menu gry / DJ booth” -->
+    <!-- Nunito: UI (700 body / 900 czarne nagłówki). Drop 800 — nie używamy. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@700;800;900&display=swap&subset=latin,latin-ext"
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@700;900&display=swap&subset=latin,latin-ext"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@700;900&display=swap&subset=latin,latin-ext"
       rel="stylesheet"
     />
+
+    <!-- Backdrop color, żeby pierwsze paint nie błyskał białym tłem przed CSS. -->
+    <style>
+      html,
+      body {
+        background: #0a0420;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

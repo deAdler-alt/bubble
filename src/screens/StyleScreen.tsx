@@ -3,10 +3,30 @@
  */
 
 import { useState } from "react";
-import { motion } from "framer-motion";
-import { Drum, Guitar, Mic2, Moon } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import type { SongStyle } from "../api/djApi";
+import { FlyingNotesOverlay } from "../components/FlyingNotesOverlay";
+import {
+  PRIMARY_CTA_BORDER,
+  PRIMARY_CTA_FOCUS,
+  PRIMARY_CTA_GRADIENT,
+  PRIMARY_CTA_SHADOW,
+  PRIMARY_CTA_TEXT,
+} from "../theme/primaryCta";
 import { screenFlowRoot } from "./screenLayout";
+
+/** Większy padding-top = nagłówek niżej na ekranie. */
+const STYLE_HEADER_TOP_OFFSET = "clamp(3.25rem, 10dvh, 8rem)";
+
+/**
+ * Skalowanie kafli stylów — gdzie ruszać:
+ * 1) Kontener siatki: `w-full` + opcjonalny `max-w-*` — ile szerokości zajmuje cała siatka 2×2.
+ * 2) `GenreTile`: `w-full min-w-0` (kafel wypełnia komórkę); bez osobnego `max-w`, żeby nie zostawały puste marginesy.
+ * 3) `aspect-[5/4]` — proporcje karty.
+ * 4) `fontSize` (emoji / label) — najlepiej `vmin`, żeby sensownie wyglądało na wąskich i szerokich ekranach.
+ */
+const GENRE_GRID_CLASS =
+  "mx-auto grid w-full max-w-[min(100%,94vw,48rem)] grid-cols-2 gap-[clamp(0.65rem,2vw,1.35rem)]";
 
 type GenreCard = {
   style: SongStyle;
@@ -15,7 +35,6 @@ type GenreCard = {
   bgFrom: string;
   bgVia: string;
   bgTo: string;
-  Icon: typeof Drum;
 };
 
 const GENRES: GenreCard[] = [
@@ -26,7 +45,6 @@ const GENRES: GenreCard[] = [
     bgFrom: "from-red-500",
     bgVia: "via-orange-500",
     bgTo: "to-yellow-300",
-    Icon: Guitar,
   },
   {
     style: "kolysanka",
@@ -35,16 +53,14 @@ const GENRES: GenreCard[] = [
     bgFrom: "from-indigo-500",
     bgVia: "via-violet-600",
     bgTo: "to-sky-400",
-    Icon: Moon,
   },
   {
     style: "pop",
     label: "Pop",
-    emoji: "👑",
+    emoji: "🎤",
     bgFrom: "from-pink-400",
     bgVia: "via-fuchsia-500",
     bgTo: "to-amber-300",
-    Icon: Mic2,
   },
   {
     style: "hiphop",
@@ -53,7 +69,6 @@ const GENRES: GenreCard[] = [
     bgFrom: "from-emerald-500",
     bgVia: "via-teal-500",
     bgTo: "to-cyan-400",
-    Icon: Drum,
   },
 ];
 
@@ -64,6 +79,7 @@ type StyleScreenProps = {
 
 export function StyleScreen({ initialStyle = "pop", onConfirm }: StyleScreenProps) {
   const [selected, setSelected] = useState<SongStyle>(initialStyle);
+  const prefersReducedMotion = !!useReducedMotion();
 
   return (
     <motion.div
@@ -74,10 +90,11 @@ export function StyleScreen({ initialStyle = "pop", onConfirm }: StyleScreenProp
       transition={{ duration: 0.42 }}
       className={`${screenFlowRoot} grid grid-rows-[auto_minmax(0,1fr)_auto]`}
     >
+      <FlyingNotesOverlay reducedMotion={prefersReducedMotion} />
       <Header />
 
-      <div className="flex min-h-0 items-center justify-center px-4">
-        <div className="grid w-full max-w-[1100px] grid-cols-2 gap-[clamp(1rem,2.5vw,2.5rem)]">
+      <div className="flex min-h-0 items-center justify-center px-3 py-1 sm:px-4 sm:py-2">
+        <div className={GENRE_GRID_CLASS}>
           {GENRES.map((g) => (
             <GenreTile
               key={g.style}
@@ -93,21 +110,25 @@ export function StyleScreen({ initialStyle = "pop", onConfirm }: StyleScreenProp
         <motion.button
           type="button"
           onClick={() => onConfirm(selected)}
-          className="rounded-[3rem] border-[8px] border-black bg-linear-to-r from-red-500 via-orange-500 to-yellow-400 px-[clamp(2.5rem,6vw,5.5rem)] py-[clamp(1rem,2dvh,1.6rem)] font-black uppercase tracking-[0.18em] text-black shadow-[0_14px_0_0_black,0_0_50px_rgba(239,68,68,0.7)] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-yellow-200"
+          className={[
+            "rounded-[3rem] px-[clamp(2.5rem,6vw,5.5rem)] py-[clamp(1rem,2dvh,1.6rem)]",
+            PRIMARY_CTA_BORDER,
+            PRIMARY_CTA_GRADIENT,
+            PRIMARY_CTA_TEXT,
+            PRIMARY_CTA_SHADOW,
+            PRIMARY_CTA_FOCUS,
+          ].join(" ")}
           style={{ fontSize: "clamp(1.2rem, 2.5vw, 2.25rem)" }}
-          animate={{
-            scale: [1, 1.06, 1],
-            boxShadow: [
-              "0 14px 0 0 #000, 0 0 38px rgba(239,68,68,0.85)",
-              "0 14px 0 0 #000, 0 0 60px rgba(250,204,21,0.95)",
-              "0 14px 0 0 #000, 0 0 38px rgba(239,68,68,0.85)",
-            ],
+          initial={false}
+          whileHover={{
+            scale: 1.06,
+            boxShadow:
+              "0 14px 0 0 #000, 0 0 52px rgba(250,204,21,0.85), 0 0 88px rgba(251,146,60,0.55)",
           }}
-          transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.95 }}
+          whileTap={{ scale: 0.96 }}
+          transition={{ type: "spring", stiffness: 420, damping: 22 }}
         >
-          ► START ◄
+            ▶ START ◀
         </motion.button>
       </div>
     </motion.div>
@@ -116,30 +137,29 @@ export function StyleScreen({ initialStyle = "pop", onConfirm }: StyleScreenProp
 
 function Header() {
   return (
-    <div className="pt-[clamp(1.25rem,5dvh,4rem)] pb-[clamp(0.5rem,1.2dvh,1.25rem)]">
+    <div
+      className="pb-[clamp(0.5rem,1.2dvh,1rem)]"
+      style={{ paddingTop: STYLE_HEADER_TOP_OFFSET }}
+    >
       <h1
-        className="text-center font-black uppercase"
+        className="text-center font-black uppercase text-white"
         style={{
           fontFamily:
             "'Bungee',Impact,Haettenschweiler,ui-sans-serif,system-ui,sans-serif",
-          fontSize: "clamp(2.5rem, min(8vw, 12vh), 8rem)",
+          fontSize: "clamp(2.5rem, min(6.5vw, 12vh), 12rem)",
           letterSpacing: "0.12em",
-          lineHeight: 0.98,
-          backgroundImage:
-            "linear-gradient(170deg,#fff,#fde68a 30%,#f472b6 70%,#7e22ce)",
-          WebkitBackgroundClip: "text",
-          backgroundClip: "text",
-          color: "transparent",
-          textShadow: "0 12px 0 rgba(0,0,0,0.85), 0 0 80px rgba(244,114,182,0.45)",
+          lineHeight: 1.6,
+          textShadow:
+            "0 10px 0 rgba(0,0,0,0.75), 0 3px 0 rgba(0,0,0,0.5), 0 0 48px rgba(168,85,247,0.35)",
         }}
       >
         Wybierz Styl
       </h1>
       <p
         className="mt-3 text-center font-black uppercase tracking-[0.4em] text-cyan-200/85 drop-shadow-[0_3px_0_rgba(0,0,0,0.7)]"
-        style={{ fontSize: "clamp(0.95rem, min(1.7vw, 2vh), 1.45rem)" }}
+        style={{ fontSize: "clamp(0.65rem, min(1.7vw, 2vh), 3.45rem)" }}
       >
-        ★ Bąbel zmiksuje to po Twojemu ★
+        ★ Bombel zmiksuje to po Twojemu ★
       </p>
     </div>
   );
@@ -154,7 +174,18 @@ function GenreTile({
   active: boolean;
   onSelect: () => void;
 }) {
-  const { Icon } = card;
+  /** Puls i delikatny glow tylko dla wybranej karty (po kliknięciu). */
+  const activePulse = active
+    ? {
+        scale: [1, 1.035, 1],
+        boxShadow: [
+          "0 12px 0 0 #000, 0 0 28px rgba(250,204,21,0.45)",
+          "0 12px 0 0 #000, 0 0 52px rgba(250,204,21,0.72)",
+          "0 12px 0 0 #000, 0 0 28px rgba(250,204,21,0.45)",
+        ],
+      }
+    : undefined;
+
   return (
     <motion.button
       type="button"
@@ -162,22 +193,25 @@ function GenreTile({
       aria-pressed={active}
       onClick={onSelect}
       className={[
-        "relative flex aspect-[5/4] flex-col items-center justify-center gap-3 overflow-hidden rounded-[clamp(1.5rem,2.5vw,2.5rem)] border-[8px] border-black outline-none focus-visible:ring-[6px] focus-visible:ring-yellow-300",
-        "bg-linear-to-br",
+        "relative flex h-auto w-full min-w-0 flex-col items-center justify-center gap-[clamp(0.35rem,1.2vmin,0.75rem)] overflow-hidden rounded-[clamp(1rem,2.5vmin,2rem)] border-[clamp(5px,1vmin,10px)] border-black outline-none focus-visible:ring-[4px] focus-visible:ring-yellow-300 sm:border-[10px]",
+        "aspect-[5/4] bg-linear-to-br",
         card.bgFrom,
         card.bgVia,
         card.bgTo,
         active
-          ? "shadow-[0_14px_0_0_black,0_0_60px_rgba(250,204,21,0.85)] ring-[6px] ring-yellow-300"
-          : "shadow-[0_10px_0_0_rgba(0,0,0,0.85)]",
+          ? "ring-[5px] ring-yellow-300"
+          : "shadow-[0_10px_0_0_rgba(0,0,0,0.82)]",
       ].join(" ")}
-      whileHover={{ scale: 1.04, y: -6 }}
-      whileTap={{ scale: 0.96 }}
-      animate={active ? { y: [0, -6, 0] } : { y: 0 }}
+      initial={false}
+      whileHover={
+        active ? undefined : { scale: 1.03 }
+      }
+      whileTap={{ scale: 0.97 }}
+      animate={activePulse}
       transition={
         active
-          ? { duration: 1.6, repeat: Infinity, ease: "easeInOut" }
-          : { type: "spring", stiffness: 320, damping: 22 }
+          ? { duration: 2.4, repeat: Infinity, ease: "easeInOut" }
+          : { duration: 0.2 }
       }
     >
       {/* shine */}
@@ -189,17 +223,20 @@ function GenreTile({
         }}
       />
       <span
-        className="text-white drop-shadow-[0_4px_0_rgba(0,0,0,0.75)]"
-        style={{ fontSize: "clamp(3rem, 8vw, 6rem)" }}
+        className="text-white drop-shadow-[0_3px_0_rgba(0,0,0,0.7)]"
+        style={{
+          fontSize: "clamp(2.25rem, 11vmin, 5.25rem)",
+        }}
         aria-hidden
       >
         {card.emoji}
       </span>
       <span
-        className="flex items-center gap-3 font-black uppercase tracking-[0.2em] text-black"
-        style={{ fontSize: "clamp(1rem, 1.8vw, 1.65rem)" }}
+        className="font-black uppercase tracking-[0.18em] text-black"
+        style={{
+          fontSize: "clamp(0.8rem, 3.4vmin, 1.65rem)",
+        }}
       >
-        <Icon className="size-[clamp(1.25rem,2vw,1.75rem)] stroke-[3]" />
         {card.label}
       </span>
     </motion.button>

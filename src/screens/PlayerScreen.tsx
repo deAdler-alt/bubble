@@ -35,10 +35,11 @@
  *   - Resume: kontynuujemy od `lineIndex` (state).
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { Music, Pause, Play, RotateCcw } from "lucide-react";
 import type { GeneratedSong, SongStyle } from "../api/djApi";
+import { FlyingNotesOverlay } from "../components/FlyingNotesOverlay";
 import {
   createBackingTrack,
   type BackingTrack,
@@ -48,6 +49,14 @@ import {
 import { shutUpBabel, speakBabelLine, type SpeakLineHandle } from "../lib/speech";
 import { VinylButton } from "../components/VinylButton";
 import { screenPlayerRoot } from "./screenLayout";
+import {
+  PRIMARY_CTA_BORDER,
+  PRIMARY_CTA_FOCUS,
+  PRIMARY_CTA_GRADIENT,
+  PRIMARY_CTA_GRADIENT_ACTIVE,
+  PRIMARY_CTA_SHADOW,
+  PRIMARY_CTA_TEXT,
+} from "../theme/primaryCta";
 
 /* ╔════════════════════════════════════════════════════════════╗
    ║  TUNABLES — pokrętła szybkiej regulacji                   ║
@@ -96,6 +105,7 @@ export function PlayerScreen({ song, onRestart }: PlayerScreenProps) {
   const lineIndexRef = useRef(0);
   const vinylPx = useStageSize({ vw: 0.16, vh: 0.28, min: 180, max: 280 });
   const lineH = useResponsiveLineHeight();
+  const prefersReducedMotion = !!useReducedMotion();
 
   useEffect(() => {
     lineIndexRef.current = lineIndex;
@@ -193,6 +203,23 @@ export function PlayerScreen({ song, onRestart }: PlayerScreenProps) {
     trackRef.current = null;
   }, []);
 
+  /**
+   * Stabilne handlery dla `StagePanel` i `RestartButton` — bez tego inline arrow
+   * tworzony przy każdym renderze przebija `memo()` na dzieciach.
+   */
+  const playingRef = useRef(playing);
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+  const onToggle = useCallback(() => {
+    if (playingRef.current) pauseTrack();
+    else void playTrack();
+  }, [playTrack, pauseTrack]);
+  const onRestartHandler = useCallback(() => {
+    pauseTrack();
+    onRestart();
+  }, [pauseTrack, onRestart]);
+
   return (
     <motion.div
       key="player"
@@ -202,12 +229,14 @@ export function PlayerScreen({ song, onRestart }: PlayerScreenProps) {
       transition={{ duration: 0.42 }}
       className={screenPlayerRoot}
     >
+      <FlyingNotesOverlay reducedMotion={prefersReducedMotion} />
       {/* GRID ekranu: [karaoke | stage] / footer.
           Header zniknął — tytuł żyje teraz w StagePanel POD winylem,
-          który stoi POD kulą disco z DJBoothBackdrop. */}
-      <div className="mx-auto grid h-full w-full max-w-[1500px] grid-rows-[minmax(0,1fr)_auto] gap-[clamp(0.6rem,1.2dvh,1.4rem)] px-[clamp(0.75rem,2vw,2rem)] pt-[clamp(7rem,14dvh,10rem)] pb-[max(env(safe-area-inset-bottom),12px)]">
+          który stoi POD kulą disco z DJBoothBackdrop.
+          Skalowanie: kontener jak StyleScreen — `min(100%,94vw,90rem)`. */}
+      <div className="mx-auto grid h-full w-full max-w-[min(100%,94vw,90rem)] grid-rows-[minmax(0,1fr)_auto] gap-[clamp(0.6rem,1.4dvh,1.6rem)] px-[clamp(0.75rem,2vw,2.25rem)] pt-[clamp(7rem,14dvh,10rem)] pb-[max(env(safe-area-inset-bottom),12px)]">
         {/* ═══ [1]+[2] MAIN ═══ */}
-        <div className="grid min-h-0 grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)] gap-[clamp(1rem,2vw,2.5rem)]">
+        <div className="grid min-h-0 grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] gap-[clamp(1rem,2.4vw,2.75rem)]">
           <KaraokePanel
             lyrics={song.lyrics}
             lineIndex={lineIndex}
@@ -218,7 +247,7 @@ export function PlayerScreen({ song, onRestart }: PlayerScreenProps) {
           <StagePanel
             vinylPx={vinylPx}
             playing={playing}
-            onToggle={() => (playing ? pauseTrack() : void playTrack())}
+            onToggle={onToggle}
             title={song.title}
             style={song.style}
             vibe={song.vibe}
@@ -228,12 +257,7 @@ export function PlayerScreen({ song, onRestart }: PlayerScreenProps) {
         </div>
 
         {/* ═══ [3] FOOTER — RESTART ═══ */}
-        <RestartButton
-          onRestart={() => {
-            pauseTrack();
-            onRestart();
-          }}
-        />
+        <RestartButton onRestart={onRestartHandler} />
       </div>
     </motion.div>
   );
@@ -243,7 +267,7 @@ export function PlayerScreen({ song, onRestart }: PlayerScreenProps) {
    ║  [1] KARAOKE PANEL — Spotify-like scroller (LEWA)         ║
    ╚════════════════════════════════════════════════════════════╝ */
 
-function KaraokePanel({
+const KaraokePanel = memo(function KaraokePanel({
   lyrics,
   lineIndex,
   wordIndex,
@@ -256,6 +280,31 @@ function KaraokePanel({
   playing: boolean;
   lineH: number;
 }) {
+  /**
+   * Wytnij okno widocznych linii raz na zmianę `lineIndex`/`lyrics` — nie iterujemy
+   * po całych lyrics przy każdym wordIndex (który tyka per słowo TTS).
+   */
+  const visible = useMemo(() => {
+    const out: {
+      idx: number;
+      line: string;
+      offset: number;
+      key: string;
+    }[] = [];
+    const start = Math.max(0, lineIndex - VISIBLE_PAST);
+    const end = Math.min(lyrics.length - 1, lineIndex + VISIBLE_FUTURE);
+    for (let idx = start; idx <= end; idx++) {
+      const line = lyrics[idx] ?? "";
+      out.push({
+        idx,
+        line,
+        offset: idx - lineIndex,
+        key: `${idx}-${line.slice(0, 12)}`,
+      });
+    }
+    return out;
+  }, [lyrics, lineIndex]);
+
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[2rem] border-[7px] border-black bg-linear-to-b from-fuchsia-950/80 via-purple-950/75 to-slate-950/85 p-[clamp(0.75rem,1.5vw,1.5rem)] shadow-[0_14px_0_0_black] ring-4 ring-fuchsia-500/60">
       {/* ── Pasek górny: badge KARAOKE + status ── */}
@@ -268,10 +317,10 @@ function KaraokePanel({
         </span>
         <span
           className={[
-            "rounded-full border-[4px] border-black px-3 py-1 font-black uppercase tracking-widest shadow-[0_4px_0_0_black]",
+            "rounded-full border-[4px] border-black px-3 py-1 font-black uppercase tracking-widest text-black shadow-[0_4px_0_0_black]",
             playing
-              ? "bg-pink-500 text-white animate-pulse"
-              : "bg-slate-200 text-slate-900",
+              ? `${PRIMARY_CTA_GRADIENT_ACTIVE} text-white animate-pulse`
+              : PRIMARY_CTA_GRADIENT,
           ].join(" ")}
           style={{ fontSize: "clamp(0.7rem, 1.05vw, 0.95rem)" }}
         >
@@ -293,54 +342,99 @@ function KaraokePanel({
           }}
         />
 
-        {lyrics.map((line, idx) => {
-          const offset = idx - lineIndex;
-          if (offset < -VISIBLE_PAST || offset > VISIBLE_FUTURE) return null;
-
+        {visible.map(({ key, line, offset }) => {
           const isCurrent = offset === 0;
-          const opacity = isCurrent
-            ? 1
-            : Math.max(0.18, 1 - Math.abs(offset) * 0.22);
-          const scale = isCurrent ? 1 : 0.78;
-          const tint = offset < 0 ? "text-white/55" : "text-yellow-100/55";
-
-          return (
-            <motion.div
-              key={`${idx}-${line.slice(0, 12)}`}
-              className="absolute left-0 right-0 top-1/2 px-3 text-center"
-              initial={false}
-              animate={{
-                y: offset * lineH - lineH / 2,
-                opacity,
-                scale,
-              }}
-              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-              style={{
-                fontFamily:
-                  "'Bungee',Impact,Haettenschweiler,ui-sans-serif,system-ui,sans-serif",
-                fontSize: isCurrent
-                  ? "clamp(1.4rem, min(2.9vw, 4dvh), 2.6rem)"
-                  : "clamp(0.95rem, min(1.9vw, 2.6dvh), 1.65rem)",
-                lineHeight: 1.12,
-                letterSpacing: "0.04em",
-              }}
-            >
-              {isCurrent ? (
-                <CurrentLine line={line} wordIndex={wordIndex} />
-              ) : (
-                <span className={tint}>{line}</span>
-              )}
-            </motion.div>
-          );
+          if (isCurrent) {
+            return (
+              <CurrentLineRow
+                key={key}
+                line={line}
+                wordIndex={wordIndex}
+                lineH={lineH}
+              />
+            );
+          }
+          return <OtherLineRow key={key} line={line} offset={offset} lineH={lineH} />;
         })}
       </div>
     </div>
   );
+});
+
+/**
+ * Wiersz „NIE aktualnie śpiewana linia”. Memoizujemy — przy zmianie wordIndex
+ * te linie nie wchodzą w rekoncyliację (props się nie zmieniają).
+ */
+const OtherLineRow = memo(function OtherLineRow({
+  line,
+  offset,
+  lineH,
+}: {
+  line: string;
+  offset: number;
+  lineH: number;
+}) {
+  const opacity = Math.max(0.18, 1 - Math.abs(offset) * 0.22);
+  const tint = offset < 0 ? "text-white/55" : "text-yellow-100/55";
+  return (
+    <motion.div
+      className="absolute left-0 right-0 top-1/2 px-3 text-center"
+      initial={false}
+      animate={{ y: offset * lineH - lineH / 2, opacity, scale: 0.78 }}
+      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+      style={{
+        fontFamily:
+          "'Bungee',Impact,Haettenschweiler,ui-sans-serif,system-ui,sans-serif",
+        fontSize: "clamp(0.95rem, 2.35vmin, 1.75rem)",
+        lineHeight: 1.12,
+        letterSpacing: "0.04em",
+        willChange: "transform, opacity",
+      }}
+    >
+      <span className={tint}>{line}</span>
+    </motion.div>
+  );
+});
+
+/** Aktualnie śpiewana linia (kontener animacji slide + highlight słów). */
+function CurrentLineRow({
+  line,
+  wordIndex,
+  lineH,
+}: {
+  line: string;
+  wordIndex: number;
+  lineH: number;
+}) {
+  return (
+    <motion.div
+      className="absolute left-0 right-0 top-1/2 px-3 text-center"
+      initial={false}
+      animate={{ y: -lineH / 2, opacity: 1, scale: 1 }}
+      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+      style={{
+        fontFamily:
+          "'Bungee',Impact,Haettenschweiler,ui-sans-serif,system-ui,sans-serif",
+        fontSize: "clamp(1.45rem, 3.6vmin, 2.85rem)",
+        lineHeight: 1.12,
+        letterSpacing: "0.04em",
+        willChange: "transform",
+      }}
+    >
+      <CurrentLine line={line} wordIndex={wordIndex} />
+    </motion.div>
+  );
 }
 
 /** Aktualnie śpiewana linia z highlightem słów. */
-function CurrentLine({ line, wordIndex }: { line: string; wordIndex: number }) {
-  const parts = line.split(/(\s+)/);
+const CurrentLine = memo(function CurrentLine({
+  line,
+  wordIndex,
+}: {
+  line: string;
+  wordIndex: number;
+}) {
+  const parts = useMemo(() => line.split(/(\s+)/), [line]);
   let renderedWordIdx = 0;
   return (
     <span className="font-black drop-shadow-[0_4px_0_rgba(0,0,0,0.85)]">
@@ -374,7 +468,7 @@ function CurrentLine({ line, wordIndex }: { line: string; wordIndex: number }) {
       })}
     </span>
   );
-}
+});
 
 /* ╔════════════════════════════════════════════════════════════╗
    ║  [2] STAGE PANEL — winyl (POD kulą disco) + tytuł + ster. ║
@@ -395,7 +489,7 @@ const VIBE_LABELS: Record<Vibe, string> = {
   dreamy: "DREAMY",
 };
 
-function StagePanel({
+const StagePanel = memo(function StagePanel({
   vinylPx,
   playing,
   onToggle,
@@ -472,16 +566,16 @@ function StagePanel({
       <PadButton
         ariaLabel={playing ? "Pauza" : "Odtwórz"}
         onClick={onToggle}
-        className="bg-linear-to-br from-lime-300 via-emerald-500 to-teal-700"
+        className={playing ? PRIMARY_CTA_GRADIENT_ACTIVE : PRIMARY_CTA_GRADIENT}
       >
         {playing ? (
           <Pause
-            className="stroke-[3] text-white drop-shadow-[0_4px_0_black]"
+            className="stroke-[3] text-black drop-shadow-[0_4px_0_rgba(255,255,255,0.4)]"
             style={{ width: "60%", height: "60%" }}
           />
         ) : (
           <Play
-            className="ml-[8%] stroke-[3] text-white drop-shadow-[0_4px_0_black]"
+            className="ml-[8%] stroke-[3] text-black drop-shadow-[0_4px_0_rgba(255,255,255,0.4)]"
             style={{ width: "55%", height: "55%" }}
           />
         )}
@@ -508,20 +602,22 @@ function StagePanel({
       </div>
     </div>
   );
-}
+});
 
 /** Animowane słupki VU. */
-function VuMeter({ active }: { active: boolean }) {
-  const bars = 11;
+const VU_BAR_COUNT = 11;
+const VU_BARS = Array.from({ length: VU_BAR_COUNT }, (_, i) => i);
+const VuMeter = memo(function VuMeter({ active }: { active: boolean }) {
   return (
     <div className="flex items-end gap-[3px]" aria-hidden>
-      {Array.from({ length: bars }).map((_, i) => (
+      {VU_BARS.map((i) => (
         <motion.span
           key={i}
           className="w-[clamp(0.35rem,0.8vw,0.65rem)] rounded-sm bg-linear-to-t from-fuchsia-500 via-amber-300 to-cyan-300 ring-2 ring-black"
           style={{
             height: "clamp(1.1rem, 3dvh, 2.2rem)",
             transformOrigin: "bottom",
+            willChange: "transform",
           }}
           animate={
             active
@@ -538,21 +634,38 @@ function VuMeter({ active }: { active: boolean }) {
       ))}
     </div>
   );
-}
+});
 
 /* ╔════════════════════════════════════════════════════════════╗
    ║  [3] RESTART — kolorowy CTA na dole                        ║
    ╚════════════════════════════════════════════════════════════╝ */
 
-function RestartButton({ onRestart }: { onRestart: () => void }) {
+const RestartButton = memo(function RestartButton({
+  onRestart,
+}: {
+  onRestart: () => void;
+}) {
   return (
     <motion.button
       type="button"
       onClick={onRestart}
-      className="mx-auto w-[min(96vw,46rem)] rounded-[2.5rem] border-[8px] border-black bg-linear-to-r from-cyan-400 via-fuchsia-500 to-amber-300 px-[clamp(1.5rem,3vw,3rem)] py-[clamp(0.75rem,1.6dvh,1.2rem)] font-black uppercase tracking-[0.18em] text-black shadow-[0_12px_0_0_black,0_0_50px_rgba(168,85,247,0.55)] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-yellow-200"
+      className={[
+        "mx-auto w-[min(96vw,46rem)] rounded-[2.5rem] px-[clamp(1.5rem,3vw,3rem)] py-[clamp(0.75rem,1.6dvh,1.2rem)]",
+        PRIMARY_CTA_BORDER,
+        PRIMARY_CTA_GRADIENT,
+        PRIMARY_CTA_TEXT,
+        PRIMARY_CTA_SHADOW,
+        PRIMARY_CTA_FOCUS,
+      ].join(" ")}
       style={{ fontSize: "clamp(1rem, 1.8vw, 1.5rem)" }}
-      whileHover={{ scale: 1.04, y: -4 }}
+      whileHover={{
+        scale: 1.04,
+        y: -4,
+        boxShadow:
+          "0 14px 0 0 #000, 0 0 52px rgba(250,204,21,0.85), 0 0 88px rgba(251,146,60,0.55)",
+      }}
       whileTap={{ scale: 0.96, y: 0 }}
+      transition={{ type: "spring", stiffness: 420, damping: 22 }}
     >
       <span className="inline-flex items-center justify-center gap-3">
         <RotateCcw className="size-[clamp(1.1rem,1.8vw,1.5rem)] shrink-0 stroke-[3]" />
@@ -560,13 +673,19 @@ function RestartButton({ onRestart }: { onRestart: () => void }) {
       </span>
     </motion.button>
   );
-}
+});
 
 /* ╔════════════════════════════════════════════════════════════╗
    ║  Pomocnicze komponenty + hooki                            ║
    ╚════════════════════════════════════════════════════════════╝ */
 
-function SpinningGlow({ size, active }: { size: number; active: boolean }) {
+const SpinningGlow = memo(function SpinningGlow({
+  size,
+  active,
+}: {
+  size: number;
+  active: boolean;
+}) {
   const d = size + 60;
   return (
     <motion.div
@@ -577,6 +696,7 @@ function SpinningGlow({ size, active }: { size: number; active: boolean }) {
         background:
           "conic-gradient(from 0deg, rgba(244,114,182,0.45), rgba(56,189,248,0.45), rgba(250,204,21,0.45), rgba(244,114,182,0.45))",
         filter: "blur(24px)",
+        willChange: "transform, opacity",
       }}
       animate={
         active
@@ -593,9 +713,9 @@ function SpinningGlow({ size, active }: { size: number; active: boolean }) {
       }
     />
   );
-}
+});
 
-function PadButton({
+const PadButton = memo(function PadButton({
   children,
   onClick,
   className,
@@ -618,6 +738,7 @@ function PadButton({
       style={{
         width: "clamp(3.75rem, 6.5vw, 5.5rem)",
         height: "clamp(3.75rem, 6.5vw, 5.5rem)",
+        willChange: "transform",
       }}
       whileHover={{ scale: 1.08, y: -4 }}
       whileTap={{ scale: 0.92, y: 0 }}
@@ -625,9 +746,9 @@ function PadButton({
       {children}
     </motion.button>
   );
-}
+});
 
-/** Responsywna wysokość linii w karaoke. */
+/** Responsywna wysokość linii w karaoke — listener z `passive: true`. */
 function useResponsiveLineHeight(): number {
   const [h, setH] = useState(72);
   useLayoutEffect(() => {
@@ -636,7 +757,7 @@ function useResponsiveLineHeight(): number {
       setH(Math.min(LINE_HEIGHT_MAX, Math.max(LINE_HEIGHT_MIN, px)));
     };
     calc();
-    window.addEventListener("resize", calc);
+    window.addEventListener("resize", calc, { passive: true });
     return () => window.removeEventListener("resize", calc);
   }, []);
   return h;
@@ -660,7 +781,7 @@ function useStageSize({
       setSize(Math.min(max, Math.max(min, Math.round(s))));
     };
     calc();
-    window.addEventListener("resize", calc);
+    window.addEventListener("resize", calc, { passive: true });
     return () => window.removeEventListener("resize", calc);
   }, [vw, vh, min, max]);
   return size;

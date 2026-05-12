@@ -3,10 +3,17 @@
  */
 
 import { useEffect, useState } from "react";
-import { animate, motion, useMotionValue, useTransform } from "framer-motion";
+import {
+  animate,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useTransform,
+} from "framer-motion";
 import { Cog, Music, Sparkles } from "lucide-react";
 import { generateSong } from "../api/djApi";
 import type { GeneratedSong, SongStyle } from "../api/djApi";
+import { FlyingNotesOverlay } from "../components/FlyingNotesOverlay";
 import { screenFlowRoot } from "./screenLayout";
 
 function delay(ms: number): Promise<void> {
@@ -35,6 +42,7 @@ export function LoadingScreen({
   onComplete,
 }: LoadingScreenProps) {
   const [statusIdx, setStatusIdx] = useState(0);
+  const prefersReducedMotion = !!useReducedMotion();
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +83,7 @@ export function LoadingScreen({
       transition={{ duration: 0.4 }}
       className={`${screenFlowRoot} relative grid grid-rows-[auto_minmax(0,1fr)_auto]`}
     >
+      <FlyingNotesOverlay reducedMotion={prefersReducedMotion} />
       <Header />
 
       <div className="relative flex min-h-0 flex-col items-center justify-center gap-[clamp(1.5rem,4dvh,3rem)] px-4">

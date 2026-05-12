@@ -10,6 +10,7 @@
  *   7. Vignette
  */
 
+import { memo } from "react";
 import { motion } from "framer-motion";
 
 /* ─────────────────────────────────────────────
@@ -37,6 +38,7 @@ function Spotlights() {
             clipPath: "polygon(40% 0, 60% 0, 100% 100%, 0% 100%)",
             filter: "blur(2px)",
             mixBlendMode: "screen",
+            willChange: "transform",
           }}
           animate={{ rotate: [c.angle - 6, c.angle + 6, c.angle - 6] }}
           transition={{ duration: c.duration, repeat: Infinity, ease: "easeInOut" }}
@@ -68,6 +70,7 @@ function DiscoBall() {
             backgroundBlendMode: "overlay",
             boxShadow:
               "0 0 60px rgba(168,85,247,0.55), 0 0 120px rgba(56,189,248,0.35), inset -10px -16px 24px rgba(0,0,0,0.55), inset 10px 12px 20px rgba(255,255,255,0.35)",
+            willChange: "transform",
           }}
           animate={{ rotate: 360 }}
           transition={{ duration: 22, repeat: Infinity, ease: "linear" }}
@@ -80,6 +83,7 @@ function DiscoBall() {
             background:
               "repeating-linear-gradient(45deg, rgba(255,255,255,0.15) 0 6px, transparent 6px 12px), repeating-linear-gradient(-45deg, rgba(0,0,0,0.18) 0 6px, transparent 6px 12px)",
             mixBlendMode: "overlay",
+            willChange: "transform",
           }}
           animate={{ rotate: -360 }}
           transition={{ duration: 28, repeat: Infinity, ease: "linear" }}
@@ -146,9 +150,18 @@ function StageFloor() {
   );
 }
 
-export function DJBoothBackdrop() {
+/**
+ * Backdrop jest stateless i nigdy nie zmienia propsów — memoizujemy go,
+ * żeby przerysowania ekranów (Player itd.) nie powodowały rekoncyliacji jego subtree.
+ * `contain: paint` + `isolation: isolate` izolują kompozycję od reszty drzewa,
+ * dzięki czemu repainty z ekranów nie cieną reflektorów / kuli disco.
+ */
+function DJBoothBackdropImpl() {
   return (
-    <div className="pointer-events-none fixed inset-0 -z-0 overflow-hidden bg-[#0a0420]">
+    <div
+      className="pointer-events-none fixed inset-0 -z-0 overflow-hidden bg-[#0a0420]"
+      style={{ contain: "layout paint", isolation: "isolate" }}
+    >
       {/* base */}
       <div
         className="absolute inset-0 z-0"
@@ -166,16 +179,19 @@ export function DJBoothBackdrop() {
       {/* big mood orbs */}
       <motion.div
         className="absolute -left-[16%] top-[28%] z-0 h-[68vmin] w-[68vmin] rounded-full bg-fuchsia-500/24 blur-[100px]"
+        style={{ willChange: "transform" }}
         animate={{ x: [0, 30, -14, 0], y: [0, 18, -10, 0] }}
         transition={{ duration: 24, repeat: Infinity, ease: "easeInOut" }}
       />
       <motion.div
         className="absolute -right-[12%] bottom-[10%] z-0 h-[62vmin] w-[62vmin] rounded-full bg-cyan-400/20 blur-[95px]"
+        style={{ willChange: "transform" }}
         animate={{ x: [0, -28, 12, 0], y: [0, -22, 10, 0] }}
         transition={{ duration: 27, repeat: Infinity, ease: "easeInOut" }}
       />
       <motion.div
         className="absolute left-1/2 top-[42%] z-0 h-[52vmin] w-[96vmin] -translate-x-1/2 rounded-full bg-yellow-400/12 blur-[110px]"
+        style={{ willChange: "transform, opacity" }}
         animate={{ opacity: [0.32, 0.55, 0.36], scale: [0.96, 1.06, 0.98] }}
         transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}
       />
@@ -190,3 +206,5 @@ export function DJBoothBackdrop() {
     </div>
   );
 }
+
+export const DJBoothBackdrop = memo(DJBoothBackdropImpl);
