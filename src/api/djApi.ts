@@ -3,9 +3,11 @@
  * Dev: proxy `/api` z vite.config.ts (-> :3001).
  * Prod: ustaw `VITE_API_BASE_URL`.
  *
- * STT i TTS dzieją się w `lib/recording.ts` + `lib/speech.ts` (browser-side
- * MediaRecorder + SpeechSynthesis). Audio dziecka → backend (Groq Whisper).
+ * Wszystkie wywołania automatycznie zapisują się do `debugLog` —
+ * dzięki temu `DebugPanel` widzi prompt + response każdego requestu.
  */
+
+import { logEntry } from "../lib/debugLog";
 
 export type SongStyle = "rock" | "kolysanka" | "pop" | "hiphop";
 
@@ -16,16 +18,33 @@ export const SONG_STYLES: readonly SongStyle[] = [
   "hiphop",
 ] as const;
 
+export type Vibe = "energetic" | "calm" | "playful" | "dreamy";
+
+export type AudioMode = "procedural" | "url";
+
+export type ApiMeta = {
+  latencyMs: number;
+  lyricsProvider?: "groq" | "template";
+  lyricsModel?: string;
+  lyricsLatencyMs?: number;
+  sttModel?: string;
+  sttLatencyMs?: number;
+};
+
 export type GeneratedSong = {
-  audioUrl: string;
-  lyrics: string[];
   title: string;
+  lyrics: string[];
   style: SongStyle;
+  vibe: Vibe;
+  audioMode: AudioMode;
+  audioUrl: string | null;
   durationMs: number;
+  meta: ApiMeta;
 };
 
 export type TranscribeResult = {
   transcript: string;
+  meta: ApiMeta;
 };
 
 const BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
@@ -86,7 +105,7 @@ async function multipartRequest<T>(
 }
 
 /* ─────────────────────────────────────────────
-   Public API
+   Public API — z auto-debug-log
    ───────────────────────────────────────────── */
 
 /** Wysyła Blob audio na /api/transcribe → Groq Whisper → polski transkrypt. */
@@ -97,20 +116,73 @@ export async function transcribeAudio(
   const ext = pickExt(audio.type);
   const fd = new FormData();
   fd.append("audio", audio, `recording.${ext}`);
-  return multipartRequest<TranscribeResult>("/api/transcribe", fd, signal);
+  const start = performance.now();
+  try {
+    const result = await multipartRequest<TranscribeResult>(
+      "/api/transcribe",
+      fd,
+      signal,
+    );
+    logEntry({
+      kind: "transcribe",
+      time: Date.now(),
+      request: { audioBytes: audio.size },
+      response: { transcript: result.transcript },
+      meta: result.meta as unknown as Record<string, unknown>,
+      totalLatencyMs: Math.round(performance.now() - start),
+    });
+    return result;
+  } catch (err) {
+    logEntry({
+      kind: "transcribe",
+      time: Date.now(),
+      request: { audioBytes: audio.size },
+      totalLatencyMs: Math.round(performance.now() - start),
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 }
 
-/** Generuje piosenkę: lyrics (Groq Llama / szablon) + audio URL z sampleBank. */
+/** Generuje piosenkę: lyrics+vibe (Groq Llama / szablon) + audioMode "procedural". */
 export async function generateSong(
   prompt: string,
   style: SongStyle,
   signal?: AbortSignal,
 ): Promise<GeneratedSong> {
-  return jsonRequest<GeneratedSong>("/api/songs", {
-    method: "POST",
-    body: JSON.stringify({ prompt, style }),
-    signal,
-  });
+  const start = performance.now();
+  try {
+    const result = await jsonRequest<GeneratedSong>("/api/songs", {
+      method: "POST",
+      body: JSON.stringify({ prompt, style }),
+      signal,
+    });
+    logEntry({
+      kind: "song",
+      time: Date.now(),
+      request: { prompt, style },
+      response: {
+        title: result.title,
+        lyrics: result.lyrics,
+        vibe: result.vibe,
+        audioMode: result.audioMode,
+        audioUrl: result.audioUrl,
+        durationMs: result.durationMs,
+      },
+      meta: result.meta as unknown as Record<string, unknown>,
+      totalLatencyMs: Math.round(performance.now() - start),
+    });
+    return result;
+  } catch (err) {
+    logEntry({
+      kind: "song",
+      time: Date.now(),
+      request: { prompt, style },
+      totalLatencyMs: Math.round(performance.now() - start),
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 }
 
 export async function pingApi(): Promise<{

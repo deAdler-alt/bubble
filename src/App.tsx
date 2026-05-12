@@ -14,6 +14,7 @@
 import { useCallback, useState } from "react";
 import { AnimatePresence, LayoutGroup } from "framer-motion";
 import type { GeneratedSong, SongStyle } from "./api/djApi";
+import { DebugPanel } from "./components/DebugPanel";
 import { DJBoothBackdrop } from "./components/DJBoothBackdrop";
 import { LoadingScreen } from "./screens/LoadingScreen";
 import { PlayerScreen } from "./screens/PlayerScreen";
@@ -94,6 +95,9 @@ export default function App() {
             ) : null}
           </AnimatePresence>
         </div>
+
+        {/* Floating debug panel — toggle Cmd/Ctrl+\ */}
+        <DebugPanel />
       </div>
     </LayoutGroup>
   );

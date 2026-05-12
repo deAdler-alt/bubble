@@ -1,9 +1,13 @@
 /**
- * Generator tekstów piosenek — szkielety per styl + bezpieczna inkorporacja
- * promptu użytkownika. Deterministyczny przy tym samym (prompt, style).
+ * Generator tekstów piosenek (FALLBACK gdy brak Groq).
+ * Deterministyczny przy tym samym (prompt, style) — szkielety per styl
+ * + bezpieczna inkorporacja promptu użytkownika.
+ *
+ * Bonus: `pickVibe(style)` zwraca rozsądny default vibe dla stylu,
+ * używany gdy LLM padnie i lecimy z szablonu.
  */
 
-import type { SongStyle } from "../types.js";
+import type { SongStyle, Vibe } from "../types.js";
 
 const INTROS: Record<SongStyle, string[]> = {
   rock: [
@@ -133,11 +137,21 @@ export function buildTitle(prompt: string, style: SongStyle): string {
   return TITLE_PATTERN[style](subject);
 }
 
-/** Stała demonstracyjna — backend mógłby tu podstawić wynik prawdziwego generatora. */
-export const DEMO_AUDIO_URL =
-  "https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3";
-
 export function approxDurationMs(lyrics: string[]): number {
   const perLine = 2200;
   return lyrics.length * perLine;
+}
+
+/** Default vibe dla stylu — używane gdy lecimy z szablonu (brak LLM). */
+export function pickVibe(style: SongStyle): Vibe {
+  switch (style) {
+    case "rock":
+      return "energetic";
+    case "pop":
+      return "playful";
+    case "hiphop":
+      return "energetic";
+    case "kolysanka":
+      return "dreamy";
+  }
 }

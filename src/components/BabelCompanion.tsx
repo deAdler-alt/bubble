@@ -7,6 +7,8 @@
  */
 
 import { motion } from "framer-motion";
+import { useReducedMotion } from "framer-motion";
+import { BabelAvatar } from "./BabelAvatar";
 
 type BabelCompanionProps = {
   message: string;
@@ -25,6 +27,7 @@ export function BabelCompanion({
   className = "",
   layoutId = "babel",
 }: BabelCompanionProps) {
+  const prefersReducedMotion = !!useReducedMotion();
   const singing = mode === "singing";
   const isSide = placement === "side";
 
@@ -38,12 +41,16 @@ export function BabelCompanion({
         className,
       ].join(" ")}
       animate={
-        singing
+        prefersReducedMotion
+          ? undefined
+          : singing
           ? { y: [0, -16, 0], scale: [1, 1.06, 1] }
           : { y: [0, -10, 0] }
       }
       transition={
-        singing
+        prefersReducedMotion
+          ? undefined
+          : singing
           ? { duration: 0.85, repeat: Infinity, ease: "easeInOut" }
           : { duration: 2.8, repeat: Infinity, ease: "easeInOut" }
       }
@@ -78,7 +85,9 @@ export function BabelCompanion({
           isSide ? "order-1" : "order-2",
         ].join(" ")}
         style={{ width: size }}
-        animate={singing ? { rotate: [-4, 4, -4] } : { rotate: 0 }}
+        animate={
+          prefersReducedMotion ? undefined : singing ? { rotate: [-4, 4, -4] } : { rotate: 0 }
+        }
         transition={
           singing
             ? { duration: 1.2, repeat: Infinity, ease: "easeInOut" }
@@ -98,12 +107,7 @@ export function BabelCompanion({
             ease: "easeInOut",
           }}
         />
-        <img
-          src="/babel-mascot.png"
-          alt="Bąbel"
-          draggable={false}
-          className="relative z-[1] block h-auto w-full drop-shadow-[0_18px_0_rgba(0,0,0,0.55)]"
-        />
+        <BabelAvatar size={size} className="relative z-[1]" />
       </motion.div>
     </motion.div>
   );

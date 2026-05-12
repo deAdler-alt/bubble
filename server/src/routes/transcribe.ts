@@ -1,6 +1,6 @@
 /**
  * POST /api/transcribe — multipart/form-data, pole `audio` (Blob).
- * Wysyła do Groq Whisper-large-v3-turbo, zwraca polski transkrypt.
+ * Wysyła do Groq Whisper-large-v3-turbo, zwraca polski transkrypt + meta.
  */
 
 import type { FastifyPluginAsync } from "fastify";
@@ -20,6 +20,7 @@ export const transcribeRoute: FastifyPluginAsync = async (app) => {
       } as unknown as TranscribeResponse);
     }
 
+    const requestStart = performance.now();
     const file = await req.file({ limits: { fileSize: MAX_AUDIO_BYTES } });
     if (!file) {
       return reply.code(400).send({
@@ -30,9 +31,9 @@ export const transcribeRoute: FastifyPluginAsync = async (app) => {
     }
 
     const buffer = await file.toBuffer();
-    const transcript = await transcribeViaGroq(buffer, file.mimetype || "audio/webm");
+    const result = await transcribeViaGroq(buffer, file.mimetype || "audio/webm");
 
-    if (!transcript) {
+    if (!result) {
       return reply.code(502).send({
         statusCode: 502,
         error: "BadGateway",
@@ -40,6 +41,23 @@ export const transcribeRoute: FastifyPluginAsync = async (app) => {
       } as unknown as TranscribeResponse);
     }
 
-    return { transcript };
+    req.log.info(
+      {
+        bytes: buffer.byteLength,
+        sttLatencyMs: result.latencyMs,
+        model: result.model,
+        chars: result.transcript.length,
+      },
+      "transcribe done",
+    );
+
+    return {
+      transcript: result.transcript,
+      meta: {
+        latencyMs: Math.round(performance.now() - requestStart),
+        sttModel: result.model,
+        sttLatencyMs: result.latencyMs,
+      },
+    };
   });
 };

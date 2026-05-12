@@ -1,15 +1,87 @@
 /**
- * PLAYER — main stage. Wielki winyl, lyric ticker, sterowanie, restart.
- * Bąbel u góry (App).
+ * PLAYER — KARAOKE Z BĄBLEM (procedural music, no external audio).
+ *
+ * Skład ekranu (od góry, dwie kolumny w środku):
+ *   ┌─────────────────────────────────────────────────────────┐
+ *   │  [DISCO BALL — w tle DJBoothBackdrop, top center]        │
+ *   ├──────────────────────────────────┬──────────────────────┤
+ *   │  [1] KARAOKE PANEL  (lewa)       │  [2] STAGE PANEL     │
+ *   │      Spotify-like:               │   ┌────────┐         │
+ *   │       past lines fade up         │   │ vinyl  │ (pod    │
+ *   │       CURRENT line BIG WHITE     │   │  glow  │  kulą   │
+ *   │       z highlightem słów         │   └────────┘  disco) │
+ *   │       future lines below         │   TYTUŁ PIOSENKI     │
+ *   │                                   │   [STYL] chip        │
+ *   │                                   │   ▶ play/pause       │
+ *   │                                   │   ║║║║║║║║ VU         │
+ *   │                                   │   Linia 3 / 8        │
+ *   │                                   │   [progress bar]     │
+ *   ├──────────────────────────────────┴──────────────────────┤
+ *   │  [3] FOOTER — restart CTA                                │
+ *   └─────────────────────────────────────────────────────────┘
+ *
+ * MECHANIKA:
+ *   - **Muzyka tła PROCEDURAL** — `lib/musicGen.ts` generuje akompaniament
+ *     in-browser (Web Audio API). Per-styl: rock/pop/hiphop/kolysanka.
+ *     Vibe (energetic/playful/calm/dreamy) transponuje tonację.
+ *     Seedowane prompt-em → ten sam prompt = ten sam utwór.
+ *   - **Bąbel śpiewa**: Web Speech API — każda linia osobno.
+ *       * onStart → reset highlightu słów
+ *       * onWord  → highlight kolejnego słowa
+ *       * onEnd   → pauza LINE_GAP_MS, następna linia
+ *   - Ducking: muzyka idzie do BACKGROUND_VOLUME gdy Bąbel śpiewa,
+ *     do FOREGROUND_VOLUME gdy idle.
+ *   - Pause/Stop: `cancel()` na aktywnym handle TTS + `track.stop()`.
+ *   - Resume: kontynuujemy od `lineIndex` (state).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { Pause, Play, RotateCcw } from "lucide-react";
-import type { GeneratedSong } from "../api/djApi";
-import { shutUpBabel, speakBabel } from "../lib/speech";
+import { motion } from "framer-motion";
+import { Music, Pause, Play, RotateCcw } from "lucide-react";
+import type { GeneratedSong, SongStyle } from "../api/djApi";
+import {
+  createBackingTrack,
+  type BackingTrack,
+  type MusicStyle,
+  type Vibe,
+} from "../lib/musicGen";
+import { shutUpBabel, speakBabelLine, type SpeakLineHandle } from "../lib/speech";
 import { VinylButton } from "../components/VinylButton";
 import { screenPlayerRoot } from "./screenLayout";
+
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  TUNABLES — pokrętła szybkiej regulacji                   ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
+/** Głośność procedural music GDY Bąbel śpiewa (0–1). Niżej = wyraźniejszy głos. */
+const BACKGROUND_VOLUME = 0.18;
+
+/** Głośność muzyki gdy Bąbel milczy (idle/po skończeniu). */
+const FOREGROUND_VOLUME = 0.55;
+
+/** Pauza między dwoma linijkami karaoke (ms). */
+const LINE_GAP_MS = 320;
+
+/** Pitch głosu Bąbla (0.5–2). Wyżej = bardziej dziecięcy/zabawny. */
+const BABEL_PITCH = 1.4;
+
+/** Tempo wypowiedzi Bąbla (0.5–2). 1.0 = normalne. */
+const BABEL_RATE = 0.95;
+
+/** Ile linijek POPRZEDNICH widać w karaoke. */
+const VISIBLE_PAST = 3;
+
+/** Ile linijek NASTĘPNYCH widać w karaoke. */
+const VISIBLE_FUTURE = 4;
+
+/** Wysokość pojedynczej linijki w pikselach (responsywnie skalowana niżej). */
+const LINE_HEIGHT_MIN = 56;
+const LINE_HEIGHT_MAX = 96;
+const LINE_HEIGHT_VH = 0.085;
+
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  KOMPONENT GŁÓWNY                                         ║
+   ╚════════════════════════════════════════════════════════════╝ */
 
 type PlayerScreenProps = {
   song: GeneratedSong;
@@ -17,54 +89,109 @@ type PlayerScreenProps = {
 };
 
 export function PlayerScreen({ song, onRestart }: PlayerScreenProps) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const trackRef = useRef<BackingTrack | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [lyricIndex, setLyricIndex] = useState(0);
-  const [audioError, setAudioError] = useState(false);
-  const vinylPx = useStageSize({ vw: 0.3, vh: 0.4, min: 280, max: 480 });
+  const [lineIndex, setLineIndex] = useState(0);
+  const [wordIndex, setWordIndex] = useState(0);
+  const lineIndexRef = useRef(0);
+  const vinylPx = useStageSize({ vw: 0.16, vh: 0.28, min: 180, max: 280 });
+  const lineH = useResponsiveLineHeight();
 
-  const playTrack = useCallback(() => {
-    const el = audioRef.current;
-    if (!el) return;
-    setAudioError(false);
-    void el.play().catch(() => {
-      setAudioError(true);
-      setPlaying(false);
-    });
-    setPlaying(true);
-  }, []);
-
-  const pauseTrack = useCallback(() => {
-    audioRef.current?.pause();
-    setPlaying(false);
-  }, []);
-
-  const lyricsKey = song.lyrics.join("|");
-
-  // Bąbel mówi raz przy załadowaniu nowej piosenki.
   useEffect(() => {
-    setLyricIndex(0);
-    setAudioError(false);
-    const el = audioRef.current;
-    if (el) el.load();
-    speakBabel(`Wow, ale hit! ${song.title}`);
+    lineIndexRef.current = lineIndex;
+  }, [lineIndex]);
+
+  // Cleanup TTS i muzyki na unmount.
+  useEffect(() => {
     return () => {
       shutUpBabel();
+      trackRef.current?.stop();
+      trackRef.current = null;
     };
-  }, [song.audioUrl, lyricsKey, song.title]);
+  }, []);
 
-  // Lyrics ticker
+  // RESET przy zmianie utworu.
+  useEffect(() => {
+    setPlaying(false);
+    setLineIndex(0);
+    setWordIndex(0);
+    lineIndexRef.current = 0;
+    shutUpBabel();
+    trackRef.current?.stop();
+    trackRef.current = null;
+  }, [song.title, song.lyrics]);
+
+  /* ── KARAOKE LOOP ── */
   useEffect(() => {
     if (!playing) return;
-    const id = window.setInterval(() => {
-      setLyricIndex((i) => {
-        const next = i + 1;
-        if (next >= song.lyrics.length) return i;
-        return next;
+    let cancelled = false;
+    let activeHandle: SpeakLineHandle | null = null;
+
+    trackRef.current?.setVolume(BACKGROUND_VOLUME);
+
+    async function loop() {
+      for (let i = lineIndexRef.current; i < song.lyrics.length; i++) {
+        if (cancelled) return;
+        setLineIndex(i);
+        setWordIndex(0);
+        const line = (song.lyrics[i] ?? "").trim();
+        if (!line) continue;
+
+        const handle = speakBabelLine(line, {
+          pitch: BABEL_PITCH,
+          rate: BABEL_RATE,
+          onStart: () => setWordIndex(0),
+          onWord: ({ wordIndex: w }) => setWordIndex(w + 1),
+        });
+        activeHandle = handle;
+        try {
+          await handle.done;
+        } catch {
+          /* ignore, continue */
+        }
+        if (cancelled) return;
+        await new Promise((r) => window.setTimeout(r, LINE_GAP_MS));
+      }
+      // Karaoke skończone naturalnie → idle.
+      if (!cancelled) {
+        setPlaying(false);
+        trackRef.current?.setVolume(FOREGROUND_VOLUME);
+      }
+    }
+
+    void loop();
+
+    return () => {
+      cancelled = true;
+      activeHandle?.cancel();
+      trackRef.current?.setVolume(FOREGROUND_VOLUME);
+    };
+  }, [playing, song.lyrics]);
+
+  const playTrack = useCallback(async () => {
+    setPlaying(true);
+    if (!trackRef.current) {
+      trackRef.current = createBackingTrack({
+        prompt: song.title + " " + song.lyrics.join(" "),
+        style: song.style as MusicStyle,
+        vibe: song.vibe as Vibe,
+        initialVolume: BACKGROUND_VOLUME,
       });
-    }, 2200);
-    return () => window.clearInterval(id);
-  }, [playing, song.lyrics.length]);
+    }
+    try {
+      await trackRef.current.start();
+      trackRef.current.setVolume(BACKGROUND_VOLUME);
+    } catch (err) {
+      console.warn("[player] backing track failed:", err);
+    }
+  }, [song.title, song.lyrics, song.style, song.vibe]);
+
+  const pauseTrack = useCallback(() => {
+    setPlaying(false);
+    shutUpBabel();
+    trackRef.current?.stop();
+    trackRef.current = null;
+  }, []);
 
   return (
     <motion.div
@@ -75,138 +202,372 @@ export function PlayerScreen({ song, onRestart }: PlayerScreenProps) {
       transition={{ duration: 0.42 }}
       className={screenPlayerRoot}
     >
-      <audio
-        ref={audioRef}
-        src={song.audioUrl}
-        preload="auto"
-        onEnded={() => {
-          setPlaying(false);
-          speakBabel("Bis? Naciśnij play albo zróbmy nową piosenkę!");
-        }}
-        onError={() => {
-          setAudioError(true);
-          setPlaying(false);
-        }}
-      />
-
-      {audioError ? (
-        <div
-          className="absolute left-1/2 top-[clamp(7rem,18dvh,10rem)] z-40 -translate-x-1/2 max-w-[42rem] rounded-2xl border-[5px] border-black bg-red-500/95 px-6 py-3 text-center font-black text-white shadow-[0_8px_0_0_black]"
-          style={{ fontSize: "clamp(0.9rem, min(1.5vw, 1.8vh), 1.25rem)" }}
-          role="alert"
-        >
-          Nie udało się odtworzyć ścieżki — sprawdź połączenie i spróbuj ponownie.
-        </div>
-      ) : null}
-
-      <div className="mx-auto grid h-full w-full max-w-[1100px] grid-rows-[auto_auto_minmax(0,1fr)_auto] place-items-center gap-[clamp(1rem,2dvh,2rem)]">
-        {/* Title */}
-        <motion.div
-          className="w-full"
-          initial={{ y: -16, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.4 }}
-        >
-          <h1
-            className="text-center font-black uppercase"
-            style={{
-              fontFamily:
-                "'Bungee',Impact,Haettenschweiler,ui-sans-serif,system-ui,sans-serif",
-              fontSize: "clamp(1.75rem, min(5vw, 8vh), 5rem)",
-              letterSpacing: "0.12em",
-              lineHeight: 0.98,
-              backgroundImage:
-                "linear-gradient(170deg,#fff,#fde68a 30%,#fb7185 70%,#7e22ce)",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-              textShadow: "0 10px 0 rgba(0,0,0,0.8), 0 0 60px rgba(244,114,182,0.45)",
-            }}
-          >
-            {song.title}
-          </h1>
-        </motion.div>
-
-        {/* Vinyl + controls */}
-        <div className="flex w-full flex-col items-center gap-[clamp(1rem,2.5dvh,1.75rem)]">
-          <div className="relative">
-            <SpinningGlow size={vinylPx} active={playing} />
-            <VinylButton
-              size={vinylPx}
-              spinning={playing}
-              onClick={() => (playing ? pauseTrack() : playTrack())}
-              ariaLabel={playing ? "Pauza na płycie" : "Odtwórz na płycie"}
-              label="♪"
-            />
-          </div>
-
-          <PadButton
-            ariaLabel={playing ? "Pauza" : "Odtwórz"}
-            onClick={() => (playing ? pauseTrack() : playTrack())}
-            className="bg-linear-to-br from-lime-300 via-emerald-500 to-teal-700"
-          >
-            {playing ? (
-              <Pause className="stroke-[3] text-white drop-shadow-[0_4px_0_black]" style={{ width: "60%", height: "60%" }} />
-            ) : (
-              <Play className="ml-[8%] stroke-[3] text-white drop-shadow-[0_4px_0_black]" style={{ width: "55%", height: "55%" }} />
-            )}
-          </PadButton>
+      {/* GRID ekranu: [karaoke | stage] / footer.
+          Header zniknął — tytuł żyje teraz w StagePanel POD winylem,
+          który stoi POD kulą disco z DJBoothBackdrop. */}
+      <div className="mx-auto grid h-full w-full max-w-[1500px] grid-rows-[minmax(0,1fr)_auto] gap-[clamp(0.6rem,1.2dvh,1.4rem)] px-[clamp(0.75rem,2vw,2rem)] pt-[clamp(7rem,14dvh,10rem)] pb-[max(env(safe-area-inset-bottom),12px)]">
+        {/* ═══ [1]+[2] MAIN ═══ */}
+        <div className="grid min-h-0 grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)] gap-[clamp(1rem,2vw,2.5rem)]">
+          <KaraokePanel
+            lyrics={song.lyrics}
+            lineIndex={lineIndex}
+            wordIndex={wordIndex}
+            playing={playing}
+            lineH={lineH}
+          />
+          <StagePanel
+            vinylPx={vinylPx}
+            playing={playing}
+            onToggle={() => (playing ? pauseTrack() : void playTrack())}
+            title={song.title}
+            style={song.style}
+            vibe={song.vibe}
+            lineCount={song.lyrics.length}
+            currentLine={lineIndex}
+          />
         </div>
 
-        {/* Lyrics */}
-        <div className="flex w-full max-w-[860px] items-center justify-center px-2">
-          <motion.div
-            className="relative w-full overflow-hidden rounded-[2rem] border-[7px] border-black bg-black/72 px-8 py-7 text-center shadow-[0_14px_0_0_black] ring-4 ring-fuchsia-500/80"
-            layout
-          >
-            <span
-              className="pointer-events-none absolute inset-0 opacity-30 mix-blend-screen"
-              style={{
-                background:
-                  "conic-gradient(from 220deg, transparent 0deg, rgba(255,255,255,0.55) 30deg, transparent 90deg, transparent 360deg)",
-              }}
-            />
-            <AnimatePresence mode="wait">
-              <motion.p
-                key={lyricIndex}
-                className="relative z-10 font-black leading-snug text-yellow-200"
-                style={{ fontSize: "clamp(1.2rem, 2.6vw, 2.4rem)" }}
-                initial={{ opacity: 0, y: 12, filter: "blur(4px)" }}
-                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                exit={{ opacity: 0, y: -12, filter: "blur(4px)" }}
-                transition={{ duration: 0.32 }}
-              >
-                {song.lyrics[lyricIndex] ?? "…"}
-              </motion.p>
-            </AnimatePresence>
-          </motion.div>
-        </div>
-
-        {/* Restart CTA */}
-        <motion.button
-          type="button"
-          onClick={() => {
+        {/* ═══ [3] FOOTER — RESTART ═══ */}
+        <RestartButton
+          onRestart={() => {
             pauseTrack();
-            shutUpBabel();
             onRestart();
           }}
-          className="mb-[max(env(safe-area-inset-bottom),24px)] w-[min(96vw,46rem)] rounded-[2.5rem] border-[8px] border-black bg-linear-to-r from-cyan-400 via-fuchsia-500 to-amber-300 px-[clamp(1.5rem,3vw,3rem)] py-[clamp(0.9rem,2dvh,1.4rem)] font-black uppercase tracking-[0.18em] text-black shadow-[0_14px_0_0_black,0_0_50px_rgba(168,85,247,0.55)] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-yellow-200"
-          style={{ fontSize: "clamp(1rem, 2vw, 1.65rem)" }}
-          whileHover={{ scale: 1.04, y: -4 }}
-          whileTap={{ scale: 0.96, y: 0 }}
-        >
-          <span className="inline-flex items-center justify-center gap-3">
-            <RotateCcw className="size-[clamp(1.25rem,2vw,1.75rem)] shrink-0 stroke-[3]" />
-            Zróbmy nową piosenkę!
-          </span>
-        </motion.button>
+        />
       </div>
     </motion.div>
   );
 }
 
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  [1] KARAOKE PANEL — Spotify-like scroller (LEWA)         ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
+function KaraokePanel({
+  lyrics,
+  lineIndex,
+  wordIndex,
+  playing,
+  lineH,
+}: {
+  lyrics: string[];
+  lineIndex: number;
+  wordIndex: number;
+  playing: boolean;
+  lineH: number;
+}) {
+  return (
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[2rem] border-[7px] border-black bg-linear-to-b from-fuchsia-950/80 via-purple-950/75 to-slate-950/85 p-[clamp(0.75rem,1.5vw,1.5rem)] shadow-[0_14px_0_0_black] ring-4 ring-fuchsia-500/60">
+      {/* ── Pasek górny: badge KARAOKE + status ── */}
+      <div className="mb-[clamp(0.5rem,1.2dvh,1rem)] flex items-center justify-between gap-2">
+        <span
+          className="rounded-full border-[4px] border-black bg-yellow-300 px-3 py-1 font-black uppercase tracking-widest text-black shadow-[0_4px_0_0_black]"
+          style={{ fontSize: "clamp(0.7rem, 1.05vw, 0.95rem)" }}
+        >
+          ♪ KARAOKE
+        </span>
+        <span
+          className={[
+            "rounded-full border-[4px] border-black px-3 py-1 font-black uppercase tracking-widest shadow-[0_4px_0_0_black]",
+            playing
+              ? "bg-pink-500 text-white animate-pulse"
+              : "bg-slate-200 text-slate-900",
+          ].join(" ")}
+          style={{ fontSize: "clamp(0.7rem, 1.05vw, 0.95rem)" }}
+        >
+          {playing ? "● BĄBEL ŚPIEWA" : "▶ NACIŚNIJ PLAY"}
+        </span>
+      </div>
+
+      {/* ── Wskaźnik centrum ── */}
+      <div className="pointer-events-none absolute left-0 right-0 top-1/2 z-0 h-px -translate-y-1/2 bg-linear-to-r from-transparent via-yellow-300/40 to-transparent" />
+
+      {/* ── Stream linijek ── */}
+      <div className="relative flex-1 overflow-hidden">
+        {/* Maska fadeująca góra + dół */}
+        <div
+          className="pointer-events-none absolute inset-0 z-10"
+          style={{
+            background:
+              "linear-gradient(to bottom, rgba(20,10,40,1) 0%, rgba(20,10,40,0) 16%, rgba(20,10,40,0) 84%, rgba(20,10,40,1) 100%)",
+          }}
+        />
+
+        {lyrics.map((line, idx) => {
+          const offset = idx - lineIndex;
+          if (offset < -VISIBLE_PAST || offset > VISIBLE_FUTURE) return null;
+
+          const isCurrent = offset === 0;
+          const opacity = isCurrent
+            ? 1
+            : Math.max(0.18, 1 - Math.abs(offset) * 0.22);
+          const scale = isCurrent ? 1 : 0.78;
+          const tint = offset < 0 ? "text-white/55" : "text-yellow-100/55";
+
+          return (
+            <motion.div
+              key={`${idx}-${line.slice(0, 12)}`}
+              className="absolute left-0 right-0 top-1/2 px-3 text-center"
+              initial={false}
+              animate={{
+                y: offset * lineH - lineH / 2,
+                opacity,
+                scale,
+              }}
+              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+              style={{
+                fontFamily:
+                  "'Bungee',Impact,Haettenschweiler,ui-sans-serif,system-ui,sans-serif",
+                fontSize: isCurrent
+                  ? "clamp(1.4rem, min(2.9vw, 4dvh), 2.6rem)"
+                  : "clamp(0.95rem, min(1.9vw, 2.6dvh), 1.65rem)",
+                lineHeight: 1.12,
+                letterSpacing: "0.04em",
+              }}
+            >
+              {isCurrent ? (
+                <CurrentLine line={line} wordIndex={wordIndex} />
+              ) : (
+                <span className={tint}>{line}</span>
+              )}
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Aktualnie śpiewana linia z highlightem słów. */
+function CurrentLine({ line, wordIndex }: { line: string; wordIndex: number }) {
+  const parts = line.split(/(\s+)/);
+  let renderedWordIdx = 0;
+  return (
+    <span className="font-black drop-shadow-[0_4px_0_rgba(0,0,0,0.85)]">
+      {parts.map((part, i) => {
+        if (/^\s+$/.test(part)) return <span key={i}>{part}</span>;
+        const myIdx = renderedWordIdx++;
+        const sung = myIdx < wordIndex;
+        const current = myIdx === wordIndex;
+        const colorClass = sung
+          ? "text-white"
+          : current
+            ? "text-yellow-300"
+            : "text-white/45";
+        return (
+          <motion.span
+            key={i}
+            className={colorClass}
+            animate={
+              current
+                ? {
+                    scale: 1.06,
+                    textShadow: "0 0 18px rgba(255,255,255,0.85)",
+                  }
+                : { scale: 1, textShadow: "0 0 0 rgba(255,255,255,0)" }
+            }
+            transition={{ duration: 0.18 }}
+          >
+            {part}
+          </motion.span>
+        );
+      })}
+    </span>
+  );
+}
+
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  [2] STAGE PANEL — winyl (POD kulą disco) + tytuł + ster. ║
+   ║  Tytuł utworu siedzi BEZPOŚREDNIO pod winylem.            ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
+const STYLE_LABELS: Record<SongStyle, string> = {
+  rock: "ROCK",
+  pop: "POP",
+  hiphop: "HIP-HOP",
+  kolysanka: "KOŁYSANKA",
+};
+
+const VIBE_LABELS: Record<Vibe, string> = {
+  energetic: "ENERGETIC",
+  playful: "PLAYFUL",
+  calm: "CALM",
+  dreamy: "DREAMY",
+};
+
+function StagePanel({
+  vinylPx,
+  playing,
+  onToggle,
+  title,
+  style,
+  vibe,
+  lineCount,
+  currentLine,
+}: {
+  vinylPx: number;
+  playing: boolean;
+  onToggle: () => void;
+  title: string;
+  style: SongStyle;
+  vibe: Vibe;
+  lineCount: number;
+  currentLine: number;
+}) {
+  const progress =
+    lineCount > 0 ? Math.min(100, ((currentLine + 1) / lineCount) * 100) : 0;
+  return (
+    <div className="flex h-full min-h-0 flex-col items-center justify-start gap-[clamp(0.6rem,1.4dvh,1.4rem)] rounded-[2rem] border-[7px] border-black bg-linear-to-b from-amber-300/15 via-transparent to-fuchsia-500/15 p-[clamp(0.75rem,1.5vw,1.5rem)] shadow-[0_14px_0_0_rgba(0,0,0,0.55)]">
+      {/* ── Winyl (POD kulą disco z backdropu) ── */}
+      <div className="relative shrink-0">
+        <SpinningGlow size={vinylPx} active={playing} />
+        <VinylButton
+          size={vinylPx}
+          spinning={playing}
+          onClick={onToggle}
+          ariaLabel={playing ? "Pauza na płycie" : "Odtwórz na płycie"}
+          label="♪"
+        />
+      </div>
+
+      {/* ── TYTUŁ PIOSENKI (pod winylem) ── */}
+      <h1
+        className="text-center font-black uppercase"
+        style={{
+          fontFamily:
+            "'Bungee',Impact,Haettenschweiler,ui-sans-serif,system-ui,sans-serif",
+          fontSize: "clamp(1.1rem, min(2.2vw, 3.2dvh), 2rem)",
+          letterSpacing: "0.08em",
+          lineHeight: 1.05,
+          backgroundImage:
+            "linear-gradient(170deg,#fff,#fde68a 30%,#fb7185 70%,#7e22ce)",
+          WebkitBackgroundClip: "text",
+          backgroundClip: "text",
+          color: "transparent",
+          textShadow:
+            "0 6px 0 rgba(0,0,0,0.85), 0 0 32px rgba(244,114,182,0.4)",
+        }}
+      >
+        {title}
+      </h1>
+
+      {/* ── Chip stylu + vibe ── */}
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full border-[4px] border-black bg-black/85 px-3 py-1 font-black uppercase tracking-[0.18em] text-yellow-300 shadow-[0_4px_0_0_black]"
+          style={{ fontSize: "clamp(0.65rem, 1vw, 0.85rem)" }}
+        >
+          <Music className="size-3 stroke-[3]" />
+          {STYLE_LABELS[style]}
+        </span>
+        <span
+          className="rounded-full border-[4px] border-black bg-fuchsia-500 px-3 py-1 font-black uppercase tracking-[0.18em] text-white shadow-[0_4px_0_0_black]"
+          style={{ fontSize: "clamp(0.65rem, 1vw, 0.85rem)" }}
+        >
+          {VIBE_LABELS[vibe]}
+        </span>
+      </div>
+
+      {/* ── Główny play/pause pad ── */}
+      <PadButton
+        ariaLabel={playing ? "Pauza" : "Odtwórz"}
+        onClick={onToggle}
+        className="bg-linear-to-br from-lime-300 via-emerald-500 to-teal-700"
+      >
+        {playing ? (
+          <Pause
+            className="stroke-[3] text-white drop-shadow-[0_4px_0_black]"
+            style={{ width: "60%", height: "60%" }}
+          />
+        ) : (
+          <Play
+            className="ml-[8%] stroke-[3] text-white drop-shadow-[0_4px_0_black]"
+            style={{ width: "55%", height: "55%" }}
+          />
+        )}
+      </PadButton>
+
+      {/* ── VU meter (animowane słupki) ── */}
+      <VuMeter active={playing} />
+
+      {/* ── Progress: linia X z N ── */}
+      <div className="flex w-full flex-col items-center gap-1">
+        <div
+          className="text-center font-black uppercase tracking-[0.18em] text-yellow-200"
+          style={{ fontSize: "clamp(0.65rem, 0.95vw, 0.9rem)" }}
+        >
+          Linia {Math.min(currentLine + 1, lineCount)} / {lineCount}
+        </div>
+        <div className="h-2 w-full overflow-hidden rounded-full border-2 border-black bg-black/60">
+          <motion.div
+            className="h-full bg-linear-to-r from-cyan-400 via-fuchsia-500 to-yellow-300"
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Animowane słupki VU. */
+function VuMeter({ active }: { active: boolean }) {
+  const bars = 11;
+  return (
+    <div className="flex items-end gap-[3px]" aria-hidden>
+      {Array.from({ length: bars }).map((_, i) => (
+        <motion.span
+          key={i}
+          className="w-[clamp(0.35rem,0.8vw,0.65rem)] rounded-sm bg-linear-to-t from-fuchsia-500 via-amber-300 to-cyan-300 ring-2 ring-black"
+          style={{
+            height: "clamp(1.1rem, 3dvh, 2.2rem)",
+            transformOrigin: "bottom",
+          }}
+          animate={
+            active
+              ? { scaleY: [0.3, 0.55 + ((i * 37) % 45) / 100, 0.3] }
+              : { scaleY: 0.3 }
+          }
+          transition={{
+            duration: 0.45 + (i % 4) * 0.08,
+            repeat: active ? Infinity : 0,
+            ease: "easeInOut",
+            delay: i * 0.05,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  [3] RESTART — kolorowy CTA na dole                        ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
+function RestartButton({ onRestart }: { onRestart: () => void }) {
+  return (
+    <motion.button
+      type="button"
+      onClick={onRestart}
+      className="mx-auto w-[min(96vw,46rem)] rounded-[2.5rem] border-[8px] border-black bg-linear-to-r from-cyan-400 via-fuchsia-500 to-amber-300 px-[clamp(1.5rem,3vw,3rem)] py-[clamp(0.75rem,1.6dvh,1.2rem)] font-black uppercase tracking-[0.18em] text-black shadow-[0_12px_0_0_black,0_0_50px_rgba(168,85,247,0.55)] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-yellow-200"
+      style={{ fontSize: "clamp(1rem, 1.8vw, 1.5rem)" }}
+      whileHover={{ scale: 1.04, y: -4 }}
+      whileTap={{ scale: 0.96, y: 0 }}
+    >
+      <span className="inline-flex items-center justify-center gap-3">
+        <RotateCcw className="size-[clamp(1.1rem,1.8vw,1.5rem)] shrink-0 stroke-[3]" />
+        Zróbmy nową piosenkę!
+      </span>
+    </motion.button>
+  );
+}
+
+/* ╔════════════════════════════════════════════════════════════╗
+   ║  Pomocnicze komponenty + hooki                            ║
+   ╚════════════════════════════════════════════════════════════╝ */
+
 function SpinningGlow({ size, active }: { size: number; active: boolean }) {
-  const d = size + 80;
+  const d = size + 60;
   return (
     <motion.div
       className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
@@ -215,16 +576,19 @@ function SpinningGlow({ size, active }: { size: number; active: boolean }) {
         height: d,
         background:
           "conic-gradient(from 0deg, rgba(244,114,182,0.45), rgba(56,189,248,0.45), rgba(250,204,21,0.45), rgba(244,114,182,0.45))",
-        filter: "blur(28px)",
+        filter: "blur(24px)",
       }}
       animate={
         active
           ? { rotate: 360, opacity: [0.7, 1, 0.7] }
-          : { rotate: 0, opacity: 0.45 }
+          : { rotate: 0, opacity: 0.4 }
       }
       transition={
         active
-          ? { rotate: { duration: 8, repeat: Infinity, ease: "linear" }, opacity: { duration: 2.4, repeat: Infinity, ease: "easeInOut" } }
+          ? {
+              rotate: { duration: 8, repeat: Infinity, ease: "linear" },
+              opacity: { duration: 2.4, repeat: Infinity, ease: "easeInOut" },
+            }
           : undefined
       }
     />
@@ -252,8 +616,8 @@ function PadButton({
         className,
       ].join(" ")}
       style={{
-        width: "clamp(5rem, 9vw, 8.5rem)",
-        height: "clamp(5rem, 9vw, 8.5rem)",
+        width: "clamp(3.75rem, 6.5vw, 5.5rem)",
+        height: "clamp(3.75rem, 6.5vw, 5.5rem)",
       }}
       whileHover={{ scale: 1.08, y: -4 }}
       whileTap={{ scale: 0.92, y: 0 }}
@@ -261,6 +625,21 @@ function PadButton({
       {children}
     </motion.button>
   );
+}
+
+/** Responsywna wysokość linii w karaoke. */
+function useResponsiveLineHeight(): number {
+  const [h, setH] = useState(72);
+  useLayoutEffect(() => {
+    const calc = () => {
+      const px = Math.round(window.innerHeight * LINE_HEIGHT_VH);
+      setH(Math.min(LINE_HEIGHT_MAX, Math.max(LINE_HEIGHT_MIN, px)));
+    };
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, []);
+  return h;
 }
 
 function useStageSize({

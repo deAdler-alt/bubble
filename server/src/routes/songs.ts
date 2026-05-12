@@ -1,12 +1,14 @@
 /**
  * POST /api/songs
  *   body: { prompt: string, style: SongStyle }
- *   returns: { audioUrl, lyrics, title, style, durationMs }
+ *   returns: GeneratedSong { title, lyrics, style, vibe, audioMode, audioUrl, durationMs, meta }
  *
  * Pipeline:
- *   1. Lyrics: Groq Llama-3.3 (gdy LYRICS_PROVIDER=groq + GROQ_API_KEY).
+ *   1. Lyrics + vibe: Groq Llama (gdy LYRICS_PROVIDER=groq + GROQ_API_KEY).
  *      Fallback → szablon z data/lyrics.ts (zawsze działa).
- *   2. Audio:  pickSample() — deterministyczny wybór z sampleBank na bazie hash(prompt+style).
+ *   2. Audio: zawsze "procedural" — frontend generuje muzykę in-browser
+ *      (`src/lib/musicGen.ts`). Vibe steruje transpozycją.
+ *      Brak external URL = brak CORS, brak 403, działa offline.
  */
 
 import type { FastifyPluginAsync } from "fastify";
@@ -14,10 +16,15 @@ import {
   approxDurationMs,
   buildLyrics,
   buildTitle,
+  pickVibe,
 } from "../data/lyrics.js";
-import { pickSample } from "../data/sampleBank.js";
 import { generateLyricsViaGroq, lyricsViaGroqEnabled } from "../lib/groq.js";
-import { SONG_STYLES, type GeneratedSong, type GenerateSongBody } from "../types.js";
+import {
+  SONG_STYLES,
+  type ApiMeta,
+  type GeneratedSong,
+  type GenerateSongBody,
+} from "../types.js";
 
 const SCHEMA = {
   body: {
@@ -37,36 +44,56 @@ export const songsRoute: FastifyPluginAsync = async (app) => {
     { schema: SCHEMA },
     async (req) => {
       const { prompt, style } = req.body;
+      const requestStart = performance.now();
 
-      // 1) Lyrics
-      let lyrics: string[];
-      let title: string;
+      // 1) Lyrics + vibe
       const groqResult = lyricsViaGroqEnabled
         ? await generateLyricsViaGroq(prompt, style)
         : null;
+
+      const meta: ApiMeta = {
+        latencyMs: 0, // wypełniamy na końcu
+      };
+
+      let title: string;
+      let lyrics: string[];
+      let vibe;
       if (groqResult) {
-        req.log.info({ provider: "groq", style }, "lyrics generated");
-        lyrics = groqResult.lyrics;
         title = groqResult.title;
+        lyrics = groqResult.lyrics;
+        vibe = groqResult.vibe;
+        meta.lyricsProvider = "groq";
+        meta.lyricsModel = groqResult.model;
+        meta.lyricsLatencyMs = groqResult.latencyMs;
+        req.log.info(
+          {
+            provider: "groq",
+            style,
+            vibe,
+            latencyMs: groqResult.latencyMs,
+            model: groqResult.model,
+          },
+          "lyrics generated",
+        );
       } else {
-        req.log.info({ provider: "template", style }, "lyrics fallback");
-        lyrics = buildLyrics(prompt, style);
         title = buildTitle(prompt, style);
+        lyrics = buildLyrics(prompt, style);
+        vibe = pickVibe(style);
+        meta.lyricsProvider = "template";
+        req.log.info({ provider: "template", style, vibe }, "lyrics fallback");
       }
 
-      // 2) Audio sample
-      const sample = pickSample(prompt, style);
-      req.log.info(
-        { sample: sample.title, credit: sample.credit, style },
-        "sample picked",
-      );
+      meta.latencyMs = Math.round(performance.now() - requestStart);
 
       return {
-        audioUrl: sample.url,
-        lyrics,
         title,
+        lyrics,
         style,
+        vibe,
+        audioMode: "procedural",
+        audioUrl: null,
         durationMs: approxDurationMs(lyrics),
+        meta,
       } satisfies GeneratedSong;
     },
   );

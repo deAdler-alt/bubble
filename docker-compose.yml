@@ -1,7 +1,7 @@
 name: baibel
 
 services:
-  # ── Backend Fastify (Groq Whisper + Llama + sample bank) ──
+  # ── Backend Fastify (Groq Whisper + Llama → lyrics+vibe) ──
   server:
     build:
       context: .

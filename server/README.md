@@ -2,29 +2,58 @@
 
 Fastify (TypeScript) z trzema endpointami:
 
-| Method | Path             | Co robi                                                                   |
-| ------ | ---------------- | ------------------------------------------------------------------------- |
-| GET    | `/api/health`    | `{ status, uptimeMs, startedAt }`                                         |
-| POST   | `/api/transcribe`| multipart `audio` → Groq Whisper → `{ transcript }` (PL)                   |
-| POST   | `/api/songs`     | `{ prompt, style }` → Groq Llama lyrics + sample bank → `{ audioUrl, lyrics, title, style, durationMs }` |
+| Method | Path             | Co robi                                                                       |
+| ------ | ---------------- | ----------------------------------------------------------------------------- |
+| GET    | `/api/health`    | `{ status, uptimeMs, startedAt }`                                             |
+| POST   | `/api/transcribe`| multipart `audio` → Groq Whisper → `{ transcript, meta }` (PL)                 |
+| POST   | `/api/songs`     | `{ prompt, style }` → Groq Llama → `{ title, lyrics, vibe, audioMode, meta }` |
+
+## Architektura: muzyka
+
+**Backend NIE generuje audio i NIE hostuje plików.**
+Zwraca jedynie `audioMode: "procedural"` + `vibe`. Frontend buduje akompaniament
+in-browser (Web Audio API) — patrz `bubble/MUSIC.md` w roocie repo.
+
+Dlaczego: Pixabay/SoundCloud zwracają 403 dla bezpośrednich linków (referer-check),
+hostowanie własnych mp3 to prawne pole minowe, a generatywne modele typu MusicGen
+z HuggingFace są wolne (30-60s na utwór) i wpadają w kolejki. Procedural daje:
+zerowe zależności, instant playback, działa offline w Dockerze, per-prompt unique.
 
 ## Konfiguracja (`.env`)
 
-Skopiuj `.env.example` do `.env` i uzupełnij:
-
 ```bash
 cp .env.example .env
+nano .env   # GROQ_API_KEY=gsk_...
 ```
 
-Klucz Groq zakładasz na [console.groq.com/keys](https://console.groq.com/keys) — 1 minuta, **bez karty**, free tier:
+Klucz Groq z [console.groq.com/keys](https://console.groq.com/keys) — 1 min, **bez karty**:
 
-| Limit          | Whisper-large-v3-turbo | Llama-3.3-70b |
-| -------------- | ---------------------- | ------------- |
-| Reqs / minute  | 20                     | 30            |
-| Audio / hour   | 7200 sekund            | —             |
-| Tokens / min   | —                      | 14400         |
+| Limit         | Whisper-large-v3-turbo | Llama-3.1-8b-instant (default) | Llama-3.3-70b-versatile (opt) |
+| ------------- | ---------------------- | ------------------------------ | ----------------------------- |
+| Reqs / minute | 20                     | 30                             | 14                            |
+| Tokens / min  | —                      | 30 000                         | 14 400                        |
+| Latency p50   | ~600 ms                | ~500-900 ms                    | ~3-6 s                        |
 
-Dla zabawy z aplikacją te limity są nieosiągalne — wystarczają na setki użytkowników/godz.
+Dla zabawy z appką te limity są nieosiągalne — wystarczają na setki użytkowników/h.
+
+## Meta na response
+
+Każda odpowiedź zawiera `meta` z diagnostyką (frontend pokazuje w DebugPanel):
+
+```json
+{
+  "title": "...",
+  "lyrics": [...],
+  "vibe": "playful",
+  "audioMode": "procedural",
+  "meta": {
+    "latencyMs": 743,
+    "lyricsProvider": "groq",
+    "lyricsModel": "llama-3.1-8b-instant",
+    "lyricsLatencyMs": 612
+  }
+}
+```
 
 ## Skrypty
 
@@ -37,15 +66,11 @@ npm run typecheck
 
 ## Co się dzieje gdy brak klucza?
 
-| Endpoint           | Bez `GROQ_API_KEY`                             |
-| ------------------ | ---------------------------------------------- |
-| `GET /api/health`  | OK                                             |
-| `POST /api/transcribe` | **503** (frontend pokazuje "Brak Groq")     |
-| `POST /api/songs`  | OK — lyrics z szablonu, audio z sampleBank      |
-
-## Sample bank
-
-Lista CC0 utworów z Pixabay Music: zobacz [`src/data/sampleBank.ts`](src/data/sampleBank.ts). Pixabay Content License = de facto CC0 (bez atrybucji wymaganej, użycie komercyjne OK). Aby zmienić utwory — instrukcje w komentarzu na górze tego pliku.
+| Endpoint              | Bez `GROQ_API_KEY`                                                  |
+| --------------------- | ------------------------------------------------------------------- |
+| `GET /api/health`     | OK                                                                  |
+| `POST /api/transcribe`| **503** (frontend pokazuje komunikat z instrukcją)                  |
+| `POST /api/songs`     | OK — lyrics z szablonu, vibe per-styl default, audioMode procedural |
 
 ## Pretty logs
 
@@ -53,4 +78,4 @@ Lista CC0 utworów z Pixabay Music: zobacz [`src/data/sampleBank.ts`](src/data/s
 LOG_PRETTY=1 npm run dev
 ```
 
-Wymaga zainstalowanego `pino-pretty` w `devDependencies` (jest).
+`pino-pretty` jest w `devDependencies`.

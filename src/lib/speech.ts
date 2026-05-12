@@ -77,6 +77,148 @@ export function shutUpBabel(): void {
   }
 }
 
+/* ──────────────────────────────────────────────────────────
+   speakBabelLine — wersja "karaoke":
+     - zwraca { done: Promise, cancel: fn }
+     - emituje onStart przy realnym starcie wypowiedzi
+     - emituje onWord przy każdym word-boundary (Web Speech API)
+   Gdy TTS niedostępny (lub voices się jeszcze nie załadowały
+   i Chrome odrzuca utterance) — fallback "wirtualny" tyka
+   timerem mniej więcej tak długo jak trwałaby mowa,
+   żeby karaoke nadal się przewijało.
+   ────────────────────────────────────────────────────────── */
+
+export type SpeakLineOpts = SpeakOpts & {
+  onStart?: () => void;
+  /** wordIndex (0-based) słowa, charIndex w stringu utterance. */
+  onWord?: (info: { wordIndex: number; charIndex: number }) => void;
+};
+
+export type SpeakLineHandle = {
+  /** Resolves on natural end LUB po cancel. Reject tylko przy hard error. */
+  done: Promise<void>;
+  cancel: () => void;
+};
+
+export function speakBabelLine(
+  text: string,
+  opts: SpeakLineOpts = {},
+): SpeakLineHandle {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return { done: Promise.resolve(), cancel: () => {} };
+  }
+
+  if (!isSpeechSupported()) {
+    return fallbackTimedSpeech(trimmed, opts);
+  }
+
+  let cancelled = false;
+  let settled = false;
+  let resolveDone!: () => void;
+  let rejectDone!: (err: Error) => void;
+  const done = new Promise<void>((res, rej) => {
+    resolveDone = res;
+    rejectDone = rej;
+  });
+
+  const u = new SpeechSynthesisUtterance(trimmed);
+  const voice = pickPolishVoice();
+  if (voice) u.voice = voice;
+  u.lang = "pl-PL";
+  u.pitch = clamp(opts.pitch ?? 1.35, 0.5, 2);
+  u.rate = clamp(opts.rate ?? 1.0, 0.5, 2);
+  u.volume = clamp(opts.volume ?? 1, 0, 1);
+
+  let wordCounter = 0;
+  u.onstart = () => {
+    if (settled) return;
+    opts.onStart?.();
+  };
+  u.onboundary = (ev) => {
+    if (settled) return;
+    if (ev.name === "word") {
+      opts.onWord?.({ wordIndex: wordCounter, charIndex: ev.charIndex });
+      wordCounter++;
+    }
+  };
+  u.onend = () => {
+    if (settled) return;
+    settled = true;
+    resolveDone();
+  };
+  u.onerror = (ev) => {
+    if (settled) return;
+    settled = true;
+    if (cancelled) {
+      resolveDone();
+      return;
+    }
+    rejectDone(
+      new Error(
+        (ev as SpeechSynthesisErrorEvent).error || "speech synthesis error",
+      ),
+    );
+  };
+
+  try {
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  } catch (err) {
+    if (!settled) {
+      settled = true;
+      rejectDone(err as Error);
+    }
+  }
+
+  return {
+    done,
+    cancel: () => {
+      cancelled = true;
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        /* noop */
+      }
+      if (!settled) {
+        settled = true;
+        resolveDone();
+      }
+    },
+  };
+}
+
+/**
+ * Fallback dla braku Web Speech: imituje timing wypowiedzi
+ * tikając onWord tak jakby Bąbel mówił ~3 słowa/sekundę.
+ * Pozwala karaoke wyglądać OK nawet bez TTS.
+ */
+function fallbackTimedSpeech(text: string, opts: SpeakLineOpts): SpeakLineHandle {
+  const words = text.split(/\s+/);
+  const wordMs = 380;
+  let cancelled = false;
+  let timer: number | undefined;
+  const done = new Promise<void>((resolve) => {
+    opts.onStart?.();
+    let i = 0;
+    const tick = () => {
+      if (cancelled) return resolve();
+      if (i >= words.length) return resolve();
+      opts.onWord?.({ wordIndex: i, charIndex: 0 });
+      i++;
+      timer = window.setTimeout(tick, wordMs);
+    };
+    timer = window.setTimeout(tick, 100);
+  });
+  return {
+    done,
+    cancel: () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    },
+  };
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
